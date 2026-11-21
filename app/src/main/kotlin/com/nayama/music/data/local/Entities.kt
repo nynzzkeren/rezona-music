@@ -14,7 +14,8 @@ data class PlaylistEntity(
     val isPinned: Boolean = false,
     val sourceBlend: String = "YouTube Music",
     val createdAt: Long = System.currentTimeMillis(),
-    val updatedAt: Long = System.currentTimeMillis()
+    val updatedAt: Long = System.currentTimeMillis(),
+    val deleted: Boolean = false
 )
 
 @Entity(tableName = "tracks")
@@ -27,7 +28,10 @@ data class TrackEntity(
     val source: String = "YouTube Music",
     val isHighRes: Boolean = true,
     val audioUrl: String = "",
-    val addedAt: Long = System.currentTimeMillis()
+    val addedAt: Long = System.currentTimeMillis(),
+    val album: String = "",
+    val thumbnailUrl: String = "",
+    val updatedAt: Long = System.currentTimeMillis()
 )
 
 @Entity(
@@ -55,7 +59,10 @@ data class TrackEntity(
 data class PlaylistTrackCrossRef(
     val playlistId: String,
     val trackId: String,
-    val orderIndex: Int = 0
+    val orderIndex: Int = 0,
+    val addedAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis(),
+    val deleted: Boolean = false
 )
 
 @Entity(
@@ -72,7 +79,9 @@ data class PlaylistTrackCrossRef(
 )
 data class LikedTrackEntity(
     @PrimaryKey val trackId: String,
-    val likedAt: Long = System.currentTimeMillis()
+    val likedAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis(),
+    val deleted: Boolean = false
 )
 
 @Entity(
@@ -90,7 +99,10 @@ data class LikedTrackEntity(
 data class PlaybackHistoryEntity(
     @PrimaryKey(autoGenerate = true) val id: Long = 0L,
     val trackId: String,
-    val playedAt: Long = System.currentTimeMillis()
+    val playedAt: Long = System.currentTimeMillis(),
+    val entryId: String = "",
+    val updatedAt: Long = System.currentTimeMillis(),
+    val deleted: Boolean = false
 )
 
 @Entity(tableName = "lyrics_cache")
@@ -115,7 +127,35 @@ data class LyricsCacheEntity(
 )
 data class PinnedSpeedDialEntity(
     @PrimaryKey val trackId: String,
-    val pinnedAt: Long = System.currentTimeMillis()
+    val pinnedAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis(),
+    val deleted: Boolean = false
+)
+
+@Entity(tableName = "library_items")
+data class LibraryItemEntity(
+    @PrimaryKey val itemId: String,
+    val itemType: String,
+    val title: String,
+    val subtitle: String = "",
+    val thumbnailUrl: String = "",
+    val addedAt: Long = System.currentTimeMillis(),
+    val updatedAt: Long = System.currentTimeMillis(),
+    val deleted: Boolean = false
+)
+
+@Entity(tableName = "sync_operations")
+data class SyncOperationEntity(
+    @PrimaryKey val opKey: String,
+    val uid: String,
+    val entityType: String,
+    val entityId: String,
+    val parentId: String = "",
+    val action: String,
+    val payloadJson: String,
+    val updatedAt: Long,
+    val retryCount: Int = 0,
+    val lastError: String? = null
 )
 
 @Entity(

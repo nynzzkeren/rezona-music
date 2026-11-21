@@ -48,3 +48,13 @@
 -keep class org.mozilla.javascript.** { *; }
 -dontwarn org.mozilla.javascript.**
 -dontwarn org.jsoup.**
+
+# Firebase, Firestore, Credential Manager & WorkManager
+-keep class com.google.firebase.** { *; }
+-dontwarn com.google.firebase.**
+-keep class com.google.android.libraries.identity.googleid.** { *; }
+-dontwarn com.google.android.libraries.identity.googleid.**
+-keep class androidx.credentials.** { *; }
+-dontwarn androidx.credentials.**
+-keep class androidx.work.** { *; }
+-dontwarn androidx.work.**

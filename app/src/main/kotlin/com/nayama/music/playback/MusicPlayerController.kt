@@ -16,10 +16,16 @@ import androidx.media3.common.Player
 import androidx.media3.common.util.UnstableApi
 import androidx.media3.datasource.DefaultDataSource
 import androidx.media3.datasource.DefaultHttpDataSource
+import androidx.media3.exoplayer.DefaultRenderersFactory
 import androidx.media3.exoplayer.ExoPlayer
+import androidx.media3.exoplayer.audio.AudioSink
+import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.source.MergingMediaSource
+import androidx.media3.exoplayer.source.ProgressiveMediaSource
 import androidx.media3.session.MediaSession
 import com.nayama.music.MainActivity
+import com.nayama.music.backend.ResolvedVideoVariant
 import com.nayama.music.data.local.LibraryRepository
 import com.nayama.music.data.local.UserPreferencesRepository
 import com.nayama.music.model.Track
@@ -64,6 +70,10 @@ class MusicPlayerController private constructor(
     private var sleepTimerJob: Job? = null
     private var resolveJob: Job? = null
     private var retryCount = 0
+    private var dataSourceFactory: DefaultDataSource.Factory? = null
+
+    val dspAudioProcessor = RezonaDspAudioProcessor()
+    val audioFxController = RezonaAudioFxController()
 
     val equalizerController: AudioEqualizerController by lazy {
         AudioEqualizerController.getInstance(context)
@@ -85,11 +95,25 @@ class MusicPlayerController private constructor(
                 .setAllowCrossProtocolRedirects(true)
                 .setConnectTimeoutMs(15000)
                 .setReadTimeoutMs(15000)
-            val mediaSourceFactory = DefaultMediaSourceFactory(
-                DefaultDataSource.Factory(context, httpDataSourceFactory)
-            )
+            val dsFactory = DefaultDataSource.Factory(context, httpDataSourceFactory)
+            this.dataSourceFactory = dsFactory
+            val mediaSourceFactory = DefaultMediaSourceFactory(dsFactory)
 
-            val player = ExoPlayer.Builder(context)
+            val renderersFactory = object : DefaultRenderersFactory(context) {
+                override fun buildAudioSink(
+                    context: Context,
+                    enableFloatOutput: Boolean,
+                    enableAudioTrackPlaybackParams: Boolean
+                ): AudioSink {
+                    return DefaultAudioSink.Builder(context)
+                        .setEnableFloatOutput(false)
+                        .setEnableAudioTrackPlaybackParams(enableAudioTrackPlaybackParams)
+                        .setAudioProcessors(arrayOf(dspAudioProcessor))
+                        .build()
+                }
+            }.setExtensionRendererMode(DefaultRenderersFactory.EXTENSION_RENDERER_MODE_PREFER)
+
+            val player = ExoPlayer.Builder(context, renderersFactory)
                 .setMediaSourceFactory(mediaSourceFactory)
                 .setAudioAttributes(audioAttributes, /* handleAudioFocus = */ true)
                 .setHandleAudioBecomingNoisy(true)
@@ -115,6 +139,7 @@ class MusicPlayerController private constructor(
 
             try {
                 AudioEqualizerController.getInstance(context).attachToSession(player.audioSessionId)
+                audioFxController.attachToSession(player.audioSessionId)
                 _playbackState.value = _playbackState.value.copy(audioSessionId = player.audioSessionId)
             } catch (e: Throwable) {
                 // Graceful fallback if equalizer fails
@@ -125,6 +150,86 @@ class MusicPlayerController private constructor(
             _playbackState.value = _playbackState.value.copy(
                 errorMessage = "Gagal inisialisasi audio player: ${e.message}"
             )
+        }
+    }
+
+    fun getExoPlayer(): ExoPlayer? = exoPlayer
+
+    fun getExactPositionMs(): Long = exoPlayer?.currentPosition?.coerceAtLeast(0L) ?: _playbackState.value.currentPositionMs
+
+    fun getPlaybackSpeed(): Float = exoPlayer?.playbackParameters?.speed ?: 1.0f
+
+    fun applySoundPreset(preset: SoundPreset) {
+        setPlaybackSpeedAndPitch(preset.speed, preset.pitch)
+        dspAudioProcessor.mode = preset.dspMode
+        audioFxController.applyPreset(preset)
+    }
+
+    fun setVideoTrackEnabled(enabled: Boolean) {
+        exoPlayer?.let { player ->
+            runCatching {
+                player.trackSelectionParameters = player.trackSelectionParameters
+                    .buildUpon()
+                    .setTrackTypeDisabled(C.TRACK_TYPE_VIDEO, !enabled)
+                    .build()
+            }
+        }
+    }
+
+    /**
+     * Switches between Audio-only and Video mode on the SAME ExoPlayer instance without restarting
+     * playback or losing position. Supports both muxed progressive MP4 and merged video-only + audio.
+     */
+    fun switchAudioVideoSource(
+        audioUrl: String,
+        videoVariant: ResolvedVideoVariant?,
+        useVideo: Boolean,
+        title: String,
+        artist: String,
+        album: String = "",
+        artworkUrl: String? = null,
+        trackId: String
+    ): Boolean {
+        val player = exoPlayer ?: return false
+        val dsFactory = dataSourceFactory ?: return false
+        val savedPos = player.currentPosition.coerceAtLeast(0L)
+        val wasPlaying = player.playWhenReady || player.isPlaying
+
+        return try {
+            val metadata = MediaMetadata.Builder()
+                .setTitle(title)
+                .setArtist(artist)
+                .setAlbumTitle(album)
+                .setArtworkUri(artworkUrl?.takeIf { it.isNotBlank() }?.let { Uri.parse(it) })
+                .build()
+
+            val audioItem = MediaItem.Builder()
+                .setMediaId(trackId)
+                .setUri(Uri.parse(audioUrl))
+                .setMediaMetadata(metadata)
+                .build()
+            val audioSource = ProgressiveMediaSource.Factory(dsFactory).createMediaSource(audioItem)
+
+            val finalSource = if (useVideo && videoVariant != null) {
+                val videoItem = MediaItem.Builder()
+                    .setMediaId(trackId)
+                    .setUri(Uri.parse(videoVariant.streamUrl))
+                    .setMediaMetadata(metadata)
+                    .build()
+                val videoSource = ProgressiveMediaSource.Factory(dsFactory).createMediaSource(videoItem)
+                if (videoVariant.isMuxed) videoSource else MergingMediaSource(videoSource, audioSource)
+            } else {
+                audioSource
+            }
+
+            setVideoTrackEnabled(useVideo)
+            player.setMediaSource(finalSource, savedPos)
+            player.prepare()
+            player.playWhenReady = wasPlaying
+            true
+        } catch (e: Throwable) {
+            Log.w("MusicPlayerController", "Audio/Video source switch failed", e)
+            false
         }
     }
 
@@ -150,6 +255,14 @@ class MusicPlayerController private constructor(
 
     private fun setupPlayerListener(player: Player) {
         player.addListener(object : Player.Listener {
+            override fun onAudioSessionIdChanged(audioSessionId: Int) {
+                if (audioSessionId != C.AUDIO_SESSION_ID_UNSET && audioSessionId > 0) {
+                    runCatching { AudioEqualizerController.getInstance(context).attachToSession(audioSessionId) }
+                    runCatching { audioFxController.attachToSession(audioSessionId) }
+                    _playbackState.value = _playbackState.value.copy(audioSessionId = audioSessionId)
+                }
+            }
+
             override fun onIsPlayingChanged(isPlaying: Boolean) {
                 _playbackState.value = _playbackState.value.copy(isPlaying = isPlaying)
                 val track = _playbackState.value.currentTrack
@@ -658,6 +771,7 @@ class MusicPlayerController private constructor(
 
     fun release() {
         stopProgressTracker()
+        audioFxController.release()
         NayamaMediaService.stop(context)
         mediaSession?.release()
         mediaSession = null

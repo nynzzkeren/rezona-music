@@ -31,11 +31,13 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import com.nayama.music.data.preferences.RezonaPreferences
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -79,6 +81,9 @@ fun RezonaPosterStudio(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
+    val preferences = remember { RezonaPreferences(context) }
+    val savedLyricsStyle by preferences.lyricsStyleFlow.collectAsState(initial = LyricsStyleConfig())
+
     val selectedLines = remember {
         mutableStateListOf<String>().apply {
             if (initialSelectedLines.isNotEmpty()) {
@@ -92,17 +97,24 @@ fun RezonaPosterStudio(
     var format by remember { mutableStateOf(PosterFormat.SQUARE) }
     var background by remember { mutableStateOf(PosterBackground.GLASS) }
     var font by remember { mutableStateOf(PosterFont.EDITORIAL) }
-    var isBold by remember { mutableStateOf(true) }
-    var isCentered by remember { mutableStateOf(false) }
+    var useSyncedLyricsFont by remember { mutableStateOf(true) }
+    var isBold by remember(savedLyricsStyle.weight) {
+        mutableStateOf(savedLyricsStyle.weight != LyricsFontWeightOption.REGULAR)
+    }
+    var isCentered by remember(savedLyricsStyle.centerAlign) {
+        mutableStateOf(savedLyricsStyle.centerAlign)
+    }
     var showThumbnail by remember { mutableStateOf(true) }
     var showWatermark by remember { mutableStateOf(true) }
 
-    // Live Rendered Bitmap Preview
+    // Live Rendered Bitmap Preview (inherits Part 5 Lyrics Style bundled font!)
     val previewBitmap: Bitmap? = remember(
         selectedLines.toList(),
         format,
         background,
         font,
+        useSyncedLyricsFont,
+        savedLyricsStyle,
         isBold,
         isCentered,
         showThumbnail,
@@ -121,7 +133,8 @@ fun RezonaPosterStudio(
             isBold = isBold,
             isCentered = isCentered,
             showThumbnail = showThumbnail,
-            showWatermark = showWatermark
+            showWatermark = showWatermark,
+            customLyricsStyle = if (useSyncedLyricsFont) savedLyricsStyle else null
         )
     }
 
@@ -320,11 +333,26 @@ fun RezonaPosterStudio(
                         Text(text = "TYPOGRAPHY", style = Typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = SmokySilver)
                         Spacer(modifier = Modifier.height(8.dp))
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            item(key = "poster_lyrics_font_sync") {
+                                RezonaGlassPill(
+                                    isActive = useSyncedLyricsFont,
+                                    onClick = { useSyncedLyricsFont = true }
+                                ) {
+                                    Text(
+                                        text = savedLyricsStyle.fontFamily.displayName,
+                                        style = Typography.labelMedium,
+                                        color = if (useSyncedLyricsFont) PureWhite else SoftSilver
+                                    )
+                                }
+                            }
                             items(PosterFont.values()) { f ->
-                                val active = font == f
+                                val active = !useSyncedLyricsFont && font == f
                                 RezonaGlassPill(
                                     isActive = active,
-                                    onClick = { font = f }
+                                    onClick = {
+                                        useSyncedLyricsFont = false
+                                        font = f
+                                    }
                                 ) {
                                     Text(
                                         text = f.label,

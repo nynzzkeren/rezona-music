@@ -14,12 +14,48 @@ import org.schabi.newpipe.extractor.stream.StreamInfo
 import org.schabi.newpipe.extractor.stream.StreamInfoItem
 import java.util.concurrent.ConcurrentHashMap
 
+data class ResolvedVideoVariant(
+    val streamUrl: String,
+    val heightPx: Int,
+    val label: String,
+    val isMuxed: Boolean
+)
+
 data class ResolvedStream(
     val streamUrl: String,
     val bitrateKbps: Int,
     val format: String,
-    val expiresAtMs: Long
+    val expiresAtMs: Long,
+    val videoVariants: List<ResolvedVideoVariant> = emptyList()
 )
+
+object VideoQualitySelector {
+    fun pickVideoVariant(
+        variants: List<ResolvedVideoVariant>,
+        preferredQuality: String,
+        isOnWifi: Boolean,
+        highQualityOnWifiOnly: Boolean
+    ): ResolvedVideoVariant? {
+        if (variants.isEmpty()) return null
+        val targetMaxHeight = when (preferredQuality.trim().lowercase()) {
+            "360p" -> 360
+            "480p" -> 480
+            "720p" -> 720
+            "1080p" -> 1080
+            else -> if (isOnWifi || !highQualityOnWifiOnly) 720 else 480 // Auto
+        }
+        val effectiveCap = if (highQualityOnWifiOnly && !isOnWifi && targetMaxHeight > 480) 480 else targetMaxHeight
+        val eligible = variants.filter { it.heightPx in 144..effectiveCap }
+        return if (eligible.isNotEmpty()) {
+            eligible.sortedWith(
+                compareByDescending<ResolvedVideoVariant> { it.heightPx }
+                    .thenByDescending { it.isMuxed }
+            ).first()
+        } else {
+            variants.minByOrNull { it.heightPx }
+        }
+    }
+}
 
 /**
  * YouTube Music Audio & Search Provider powered by NewPipeExtractor.
@@ -164,11 +200,44 @@ class YouTubeMusicProvider {
                     }.thenByDescending { it.averageBitrate }
                 ).first()
 
+                // Collect both muxed progressive video streams & adaptive video-only streams (MP4/WebM)
+                val videoVariants = buildList {
+                    streamInfo?.videoStreams.orEmpty()
+                        .filter { it.isUrl && it.content.isNotBlank() && it.height in 144..1080 }
+                        .forEach { vs ->
+                            add(
+                                ResolvedVideoVariant(
+                                    streamUrl = vs.content,
+                                    heightPx = vs.height,
+                                    label = vs.resolution.ifBlank { "${vs.height}p" },
+                                    isMuxed = true
+                                )
+                            )
+                        }
+                    streamInfo?.videoOnlyStreams.orEmpty()
+                        .filter {
+                            it.isUrl && it.content.isNotBlank() && it.height in 144..1080 &&
+                                (it.format?.name?.lowercase().orEmpty().let { f -> f.contains("mp4") || f.contains("webm") })
+                        }
+                        .forEach { vs ->
+                            add(
+                                ResolvedVideoVariant(
+                                    streamUrl = vs.content,
+                                    heightPx = vs.height,
+                                    label = vs.resolution.ifBlank { "${vs.height}p" },
+                                    isMuxed = false
+                                )
+                            )
+                        }
+                }.distinctBy { "${it.heightPx}_${it.isMuxed}" }
+                    .sortedBy { it.heightPx }
+
                 val resolved = ResolvedStream(
                     streamUrl = bestAudio.content,
                     bitrateKbps = bestAudio.averageBitrate.coerceAtLeast(64),
                     format = bestAudio.format?.name ?: "M4A/Opus",
-                    expiresAtMs = System.currentTimeMillis() + BackendConfig.STREAM_URL_EXPIRY_MS
+                    expiresAtMs = System.currentTimeMillis() + BackendConfig.STREAM_URL_EXPIRY_MS,
+                    videoVariants = videoVariants
                 )
 
                 streamCache[fullUrl] = resolved

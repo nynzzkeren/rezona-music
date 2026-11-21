@@ -2,15 +2,22 @@ package com.nayama.music.playback
 
 import android.content.Context
 import android.media.AudioManager
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
+import android.os.Build
+import android.widget.Toast
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.media3.exoplayer.ExoPlayer
 import com.nayama.music.backend.LyricSourceId
 import com.nayama.music.backend.LyricsProvider
 import com.nayama.music.backend.MusicEngineRepository
+import com.nayama.music.backend.ResolvedVideoVariant
+import com.nayama.music.backend.VideoQualitySelector
 import com.nayama.music.data.local.PlaybackHistoryEntity
 import com.nayama.music.data.local.RezonaDatabase
 import com.nayama.music.data.preferences.RezonaPreferences
@@ -29,37 +36,11 @@ import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-enum class SoundPreset(
-    val id: String,
-    val label: String,
-    val speed: Float,
-    val pitch: Float,
-    val reverbProfile: EchoProfile?,
-    val reverbIntensity: Float
-) {
-    NORMAL("NORMAL", "Normal", 1.0f, 1.0f, null, 0f),
-    SLOWED_REVERB("SLOWED_REVERB", "Slowed +\nReverb", 0.85f, 0.88f, EchoProfile.GLASS_HALL, 0.68f),
-    ECHO("ECHO", "Echo", 1.0f, 1.0f, EchoProfile.CATHEDRAL, 0.78f),
-    LOFI("LOFI", "Lo-fi", 0.94f, 0.95f, EchoProfile.INTIMATE_STUDIO, 0.42f),
-    NIGHTCORE("NIGHTCORE", "Nightcore", 1.22f, 1.18f, null, 0f),
-    CONCERT("CONCERT", "Concert", 1.0f, 1.0f, EchoProfile.DEEP_VOID, 0.56f);
-
-    companion object {
-        val quickRowPresets: List<SoundPreset> = listOf(
-            SLOWED_REVERB, ECHO, LOFI, NIGHTCORE, CONCERT
-        )
-
-        fun fromId(raw: String): SoundPreset = entries.firstOrNull {
-            it.id.equals(raw, ignoreCase = true) || it.label.replace("\n", " ").equals(raw, ignoreCase = true)
-        } ?: NORMAL
-    }
-}
-
 /**
- * Single-source-of-truth PlayerController for Rezona UI V2.
- * Synchronizes MiniPlayer, Now Playing, Inline Lyrics, Queue Sheet, Notification,
- * Sound Presets (PlaybackParameters + AudioFX), System STREAM_MUSIC volume, Sleep Timer,
- * and Room Playback History / Likes.
+ * Single-source-of-truth PlayerController for Rezona Player V3.
+ * Synchronizes MiniPlayer, Now Playing, Video Mode, Butter-Smooth Inline Lyrics, Queue Sheet,
+ * Notification, 18 Sound Presets (PlaybackParameters + AudioFX + Custom PCM AudioProcessor),
+ * System STREAM_MUSIC volume, Sleep Timer, and Room Playback History / Likes.
  */
 class RezonaPlayerController(
     private val scope: CoroutineScope,
@@ -122,6 +103,21 @@ class RezonaPlayerController(
     var manualTempo = mutableFloatStateOf(1.0f)
         private set
     var manualPitch = mutableFloatStateOf(1.0f)
+        private set
+
+    // Part 3: Audio / Video Mode (same ExoPlayer session)
+    var hasVideoStream = mutableStateOf(false)
+        private set
+    var isVideoMode = mutableStateOf(false)
+        private set
+    var currentVideoQualityLabel = mutableStateOf("")
+        private set
+    private var currentResolvedAudioUrl: String? = null
+    private var currentVideoVariants: List<ResolvedVideoVariant> = emptyList()
+    private var videoPausedForBackground: Boolean = false
+
+    // Part 4: Frame-synced Lyrics clock snap signal
+    var seekEventSeq = mutableLongStateOf(0L)
         private set
 
     // Active Queue & Time Machine History
@@ -255,7 +251,24 @@ class RezonaPlayerController(
                     if (pbState.errorEventSeq > lastSeenErrorSeq) {
                         lastSeenErrorSeq = pbState.errorEventSeq
                         val active = currentTrack.value
-                        if (!isStreamResolving && active != null && retriedErrorForTrackId != active.id && musicEngine != null) {
+                        if (isVideoMode.value && active != null && !currentResolvedAudioUrl.isNullOrBlank()) {
+                            // Quiet fallback from video to audio-only without losing playback
+                            isVideoMode.value = false
+                            currentVideoQualityLabel.value = ""
+                            musicPlayer.switchAudioVideoSource(
+                                audioUrl = currentResolvedAudioUrl!!,
+                                videoVariant = null,
+                                useVideo = false,
+                                title = active.title,
+                                artist = active.artist,
+                                album = active.album,
+                                artworkUrl = active.coverArtUrl,
+                                trackId = active.id
+                            )
+                            context?.let {
+                                Toast.makeText(it, "Video stream unavailable · switched to audio", Toast.LENGTH_SHORT).show()
+                            }
+                        } else if (!isStreamResolving && active != null && retriedErrorForTrackId != active.id && musicEngine != null) {
                             retriedErrorForTrackId = active.id
                             isStreamResolving = true
                             pendingTrackId = active.id
@@ -437,6 +450,13 @@ class RezonaPlayerController(
         isStreamResolving = true
         autoAdvancingForTrackId = null
         retriedErrorForTrackId = null
+        hasVideoStream.value = false
+        isVideoMode.value = false
+        currentVideoQualityLabel.value = ""
+        currentResolvedAudioUrl = null
+        currentVideoVariants = emptyList()
+        videoPausedForBackground = false
+        seekEventSeq.longValue += 1L
         stopTicker()
         currentTrack.value = track
         if (queueTitle != null) {
@@ -449,17 +469,17 @@ class RezonaPlayerController(
         currentPositionMs.longValue = 0L
         isPlaying.value = true
 
-        // Record to Room playback history (if not paused in Privacy settings)
+        // Record to Room playback history (if not paused in Privacy settings) + enqueue cloud sync
         if (context != null) {
             scope.launch(Dispatchers.IO) {
                 runCatching {
                     val paused = preferences?.pauseHistoryFlow?.first() ?: false
-                    val db = RezonaDatabase.getInstance(context)
-                    db.trackDao().insertTrack(track.toTrackEntity())
                     if (!paused) {
-                        db.historyDao().recordPlayback(
-                            PlaybackHistoryEntity(trackId = track.id, playedAt = System.currentTimeMillis())
-                        )
+                        com.nayama.music.data.repository.RezonaLibraryRepository
+                            .getInstance(context)
+                            .recordPlayback(track)
+                    } else {
+                        RezonaDatabase.getInstance(context).trackDao().insertTrack(track.toTrackEntity())
                     }
                 }
             }
@@ -498,6 +518,9 @@ class RezonaPlayerController(
                 withContext(Dispatchers.Main) {
                     if (currentTrack.value?.id == track.id) {
                         if (resolved != null) {
+                            currentResolvedAudioUrl = resolved.streamUrl
+                            currentVideoVariants = resolved.videoVariants
+                            hasVideoStream.value = resolved.videoVariants.isNotEmpty()
                             musicPlayer.playDirectStream(
                                 streamUrl = resolved.streamUrl,
                                 title = track.title,
@@ -507,8 +530,13 @@ class RezonaPlayerController(
                                 durationMs = durationMs.longValue,
                                 trackId = track.id
                             )
-                            musicPlayer.setPlaybackSpeedAndPitch(manualTempo.floatValue, manualPitch.floatValue)
+                            if (activeSoundPreset.value != SoundPreset.NORMAL) {
+                                musicPlayer.applySoundPreset(activeSoundPreset.value)
+                            } else {
+                                musicPlayer.setPlaybackSpeedAndPitch(manualTempo.floatValue, manualPitch.floatValue)
+                            }
                             isStreamResolving = false
+                            seekEventSeq.longValue += 1L
                             startTicker()
                         } else {
                             isStreamResolving = false
@@ -670,9 +698,93 @@ class RezonaPlayerController(
         if (nextPlaying) startTicker() else stopTicker()
     }
 
+    fun getExoPlayer(): ExoPlayer? = musicPlayer?.getExoPlayer()
+
+    fun getExactClockPositionMs(): Long {
+        if (isStreamResolving) return 0L
+        return musicPlayer?.getExactPositionMs() ?: currentPositionMs.longValue
+    }
+
+    fun getCurrentPlaybackSpeed(): Float {
+        return musicPlayer?.getPlaybackSpeed() ?: manualTempo.floatValue
+    }
+
+    private fun isDeviceOnWifi(): Boolean {
+        val cm = context?.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return true
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            val caps = cm.getNetworkCapabilities(cm.activeNetwork)
+            caps?.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) == true
+        } else {
+            @Suppress("DEPRECATION")
+            cm.activeNetworkInfo?.type == ConnectivityManager.TYPE_WIFI
+        }
+    }
+
+    fun setVideoMode(enabled: Boolean) {
+        val track = currentTrack.value ?: return
+        val audioUrl = currentResolvedAudioUrl ?: return
+        if (enabled == isVideoMode.value) return
+        if (enabled && currentVideoVariants.isEmpty()) {
+            context?.let { Toast.makeText(it, "No music video available for this track", Toast.LENGTH_SHORT).show() }
+            return
+        }
+        scope.launch {
+            val qualityPref = preferences?.videoQualityFlow?.first() ?: "480p"
+            val wifiOnly = preferences?.videoHqWifiOnlyFlow?.first() ?: true
+            val selectedVideo = if (enabled) {
+                VideoQualitySelector.pickVideoVariant(
+                    variants = currentVideoVariants,
+                    preferredQuality = qualityPref,
+                    isOnWifi = isDeviceOnWifi(),
+                    highQualityOnWifiOnly = wifiOnly
+                )
+            } else null
+
+            val switched = musicPlayer?.switchAudioVideoSource(
+                audioUrl = audioUrl,
+                videoVariant = selectedVideo,
+                useVideo = enabled && selectedVideo != null,
+                title = track.title,
+                artist = track.artist,
+                album = track.album,
+                artworkUrl = track.coverArtUrl,
+                trackId = track.id
+            ) ?: false
+
+            if (switched) {
+                isVideoMode.value = enabled && selectedVideo != null
+                currentVideoQualityLabel.value = selectedVideo?.label.orEmpty()
+                if (activeSoundPreset.value != SoundPreset.NORMAL) {
+                    musicPlayer?.applySoundPreset(activeSoundPreset.value)
+                }
+            } else if (enabled) {
+                isVideoMode.value = false
+                currentVideoQualityLabel.value = ""
+                context?.let {
+                    Toast.makeText(it, "Video stream failed · playing audio", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
+
+    fun setAppInForeground(inForeground: Boolean) {
+        if (!inForeground) {
+            if (isVideoMode.value) {
+                videoPausedForBackground = true
+                musicPlayer?.setVideoTrackEnabled(false)
+            }
+        } else {
+            if (videoPausedForBackground && isVideoMode.value) {
+                videoPausedForBackground = false
+                musicPlayer?.setVideoTrackEnabled(true)
+            }
+        }
+    }
+
     fun seekToPosition(positionMs: Long) {
         val clamped = positionMs.coerceIn(0L, durationMs.longValue)
         currentPositionMs.longValue = clamped
+        seekEventSeq.longValue += 1L
         musicPlayer?.seekToPosition(clamped)
     }
 
@@ -734,13 +846,12 @@ class RezonaPlayerController(
         repeatMode.value = repeatMode.value.next()
     }
 
-    // ── Sound Presets (Stage D) & Manual Tempo/Pitch (Stage E Advanced) ──────
+    // ── Sound Presets (Part 2: 18 Presets via Media3 + AudioFX + Custom PCM DSP) ─
     fun applySoundPreset(preset: SoundPreset, toggleOffIfSame: Boolean = true, persist: Boolean = true) {
         val target = if (toggleOffIfSame && activeSoundPreset.value == preset) SoundPreset.NORMAL else preset
         activeSoundPreset.value = target
         manualTempo.floatValue = target.speed
         manualPitch.floatValue = target.pitch
-        musicPlayer?.setPlaybackSpeedAndPitch(target.speed, target.pitch)
         applySoundPresetEffectsToHardware(target)
         if (persist) {
             scope.launch { preferences?.setSoundPreset(target.id) }
@@ -748,6 +859,7 @@ class RezonaPlayerController(
     }
 
     private fun applySoundPresetEffectsToHardware(preset: SoundPreset) {
+        musicPlayer?.applySoundPreset(preset)
         if (preset.reverbProfile != null) {
             spatialReverb.setEnabled(true)
             spatialReverb.selectProfile(preset.reverbProfile)
@@ -755,13 +867,13 @@ class RezonaPlayerController(
         } else {
             spatialReverb.setEnabled(false)
         }
-        musicPlayer?.equalizerController?.applySoundPresetCurve(preset.id)
     }
 
     fun setManualTempoAndPitch(speed: Float, pitch: Float) {
         manualTempo.floatValue = speed.coerceIn(0.5f, 1.8f)
         manualPitch.floatValue = pitch.coerceIn(0.5f, 1.8f)
         activeSoundPreset.value = SoundPreset.NORMAL
+        musicPlayer?.applySoundPreset(SoundPreset.NORMAL)
         musicPlayer?.setPlaybackSpeedAndPitch(manualTempo.floatValue, manualPitch.floatValue)
     }
 

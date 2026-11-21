@@ -8,6 +8,7 @@ import android.view.HapticFeedbackConstants
 import android.widget.Toast
 import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.RepeatMode as AnimRepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -43,6 +44,7 @@ import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
@@ -60,6 +62,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.rememberModalBottomSheetState
 import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -72,12 +76,17 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.BlendMode
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalView
@@ -89,6 +98,13 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.viewinterop.AndroidView
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.media3.common.util.UnstableApi
+import androidx.media3.ui.AspectRatioFrameLayout
+import androidx.media3.ui.PlayerView
 import com.nayama.music.R
 import com.nayama.music.data.preferences.RezonaPreferences
 import com.nayama.music.model.RezonaTrack
@@ -97,6 +113,9 @@ import com.nayama.music.playback.RezonaPlayerController
 import com.nayama.music.playback.SoundPreset
 import com.nayama.music.ui.components.GlassSurface
 import com.nayama.music.ui.components.GlassSurfaceVariant
+import com.nayama.music.ui.components.LocalAmbientAccentColor
+import com.nayama.music.ui.components.LocalAmbientBaseColor
+import com.nayama.music.ui.components.LocalTintedGlassColor
 import com.nayama.music.ui.components.RezonaAsyncCoverArt
 import com.nayama.music.ui.components.RezonaContinuousAmbientLayer
 import com.nayama.music.ui.components.RezonaEqualizerModalSheet
@@ -108,10 +127,10 @@ import com.nayama.music.ui.components.RezonaGlassTextField
 import com.nayama.music.ui.components.RezonaHairlineDivider
 import com.nayama.music.ui.components.RezonaSongCardRenderer
 import com.nayama.music.ui.components.RezonaTrackMenuSheet
-import com.nayama.music.ui.components.deriveAmbientColors
 import com.nayama.music.ui.lyrics.PosterRenderer
 import com.nayama.music.ui.lyrics.RezonaInlineLyricsSection
 import com.nayama.music.ui.lyrics.RezonaPosterStudio
+import com.nayama.music.ui.theme.DynamicArtworkPalette
 import com.nayama.music.ui.theme.PearlWhite
 import com.nayama.music.ui.theme.PureWhite
 import com.nayama.music.ui.theme.SmokySilver
@@ -119,6 +138,7 @@ import com.nayama.music.ui.theme.SoftSilver
 import com.nayama.music.ui.theme.SpecularCardBorder
 import com.nayama.music.ui.theme.SpecularDockBorder
 import com.nayama.music.ui.theme.Typography
+import com.nayama.music.ui.theme.rememberAnimatedArtworkPalette
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
@@ -154,8 +174,11 @@ fun RezonaExpandedPlayer(
     val activePreset = controller.activeSoundPreset.value
     val sleepSecRemaining = controller.sleepTimerSecondsRemaining.value
     val sleepEndOfTrack = controller.sleepTimerEndOfTrack.value
+    val hasVideoStream = controller.hasVideoStream.value
+    val isVideoMode = controller.isVideoMode.value
 
     var isLyricsMode by remember { mutableStateOf(false) }
+    var showSoundSheet by remember { mutableStateOf(false) }
     var showQueueSheet by remember { mutableStateOf(false) }
     var showTrackMenuSheet by remember { mutableStateOf(false) }
     var showShareSheet by remember { mutableStateOf(false) }
@@ -166,6 +189,20 @@ fun RezonaExpandedPlayer(
     var showHeartBurst by remember { mutableStateOf(false) }
     var dismissDragY by remember { mutableFloatStateOf(0f) }
 
+    // Part 3: Pause video decoding in background (keep audio playing), resume video on return
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner, controller) {
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_STOP -> controller.setAppInForeground(false)
+                Lifecycle.Event.ON_START -> controller.setAppInForeground(true)
+                else -> Unit
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     LaunchedEffect(isVisible) {
         if (isVisible) {
             controller.syncSystemVolume()
@@ -173,6 +210,11 @@ fun RezonaExpandedPlayer(
     }
 
     val bars = remember(track.index) { WaveformGenerator.generateBars(track.index, count = 44) }
+    val artworkPalette = rememberAnimatedArtworkPalette(
+        context = context,
+        artworkUrl = track.coverArtUrl,
+        fallbackKey = track.id
+    )
 
     AnimatedVisibility(
         visible = isVisible,
@@ -185,122 +227,174 @@ fun RezonaExpandedPlayer(
             animationSpec = spring(dampingRatio = 0.84f, stiffness = 290f)
         ) + fadeOut(tween(180))
     ) {
-        val (ambientPrimary, ambientSecondary, ambientTertiary) = remember(track.id, track.title, track.artist) {
-            deriveAmbientColors(track)
-        }
-
-        Box(
-            modifier = Modifier
-                .fillMaxSize()
-                .offset { IntOffset(0, dismissDragY.coerceAtLeast(0f).roundToInt()) }
+        CompositionLocalProvider(
+            LocalAmbientBaseColor provides artworkPalette.ambientBase,
+            LocalAmbientAccentColor provides artworkPalette.primaryAmbient,
+            LocalTintedGlassColor provides artworkPalette.glassTint
         ) {
-            // ── 1. SHARED CONTINUOUS AMBIENT LAYER ─────────────────────────────
-            RezonaContinuousAmbientLayer(
-                primaryColor = ambientPrimary,
-                secondaryColor = ambientSecondary,
-                tertiaryColor = ambientTertiary,
-                vividMode = vividAmbient,
-                modifier = Modifier.fillMaxSize()
-            )
-
-            // Subtle dark vignette blending cover bottom into controls
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(
-                                Color(0x18050608),
-                                Color(0x7006070A),
-                                Color(0xCF050608)
-                            )
-                        )
-                    )
-            )
-
-            // ── 2. MAIN COLUMN (TOP CONTENT + SHARED BOTTOM CONTROL DECK) ────
-            Column(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .navigationBarsPadding(),
-                verticalArrangement = Arrangement.SpaceBetween
+                    .offset { IntOffset(0, dismissDragY.coerceAtLeast(0f).roundToInt()) }
             ) {
-                // Top Half: Morphs seamlessly between Full-Bleed Cover (`now_playing.jpg`) & Inline Lyrics (`lyrics.jpg`)
-                AnimatedContent(
-                    targetState = isLyricsMode,
-                    transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(180)) },
-                    modifier = Modifier.weight(1f),
-                    label = "player_top_mode"
-                ) { lyricsActive ->
-                    if (lyricsActive) {
-                        RezonaInlineLyricsSection(
-                            controller = controller,
-                            onCollapseToCover = { isLyricsMode = false },
-                            onOpenPosterFromShare = { showPosterStudio = true },
-                            modifier = Modifier.fillMaxSize()
-                        )
-                    } else {
-                        FullBleedCoverTopSection(
-                            track = track,
-                            queueName = controller.activeQueueName.value,
-                            isLiked = isLiked,
-                            ambientFadeColor = ambientPrimary,
-                            onOpenQueue = { showQueueSheet = true },
-                            onDoubleTapLike = {
-                                controller.toggleLike()
-                                showHeartBurst = true
-                                scope.launch {
-                                    delay(850L)
-                                    showHeartBurst = false
-                                }
-                            },
-                            onSwipeNext = { controller.skipNext() },
-                            onSwipePrev = { controller.skipPrevious() },
-                            onSwipeDownDelta = { dy ->
-                                dismissDragY = (dismissDragY + dy).coerceAtLeast(0f)
-                            },
-                            onSwipeDownRelease = {
-                                if (dismissDragY > 180f) onDismiss()
-                                dismissDragY = 0f
-                            },
-                            onLikeClick = { controller.toggleLike() },
-                            onMenuClick = { showTrackMenuSheet = true },
-                            modifier = Modifier.fillMaxSize()
-                        )
+                // ── 1. CONTINUOUS COVER-MATCHED AMBIENT LAYER (ZERO BLACK/PURPLE BOXES) ─
+                RezonaContinuousAmbientLayer(
+                    primaryColor = artworkPalette.primaryAmbient,
+                    secondaryColor = artworkPalette.secondaryAmbient,
+                    tertiaryColor = artworkPalette.tertiaryAmbient,
+                    ambientBase = artworkPalette.ambientBase,
+                    vividMode = vividAmbient,
+                    modifier = Modifier.fillMaxSize()
+                )
+
+                // ── 2. FULL-BLEED COVER (y = 0, height ~1.25x screenWidth, DstIn Alpha Mask) ─
+                if (!isLyricsMode && !isVideoMode) {
+                    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
+                        val coverHeight = (maxWidth * 1.25f).coerceAtMost(maxHeight * 0.64f)
+                        Crossfade(
+                            targetState = track.coverArtUrl.ifBlank { "idx_${track.index}" },
+                            animationSpec = tween(durationMillis = 700, easing = FastOutSlowInEasing),
+                            label = "cover_blend_crossfade",
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(coverHeight)
+                                .align(Alignment.TopCenter)
+                        ) { _ ->
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxSize()
+                                    .graphicsLayer {
+                                        compositingStrategy = CompositingStrategy.Offscreen
+                                    }
+                                    .drawWithContent {
+                                        drawContent()
+                                        // Smooth cubic-eased alpha mask over lower ~42% -> dissolves seamlessly into ambientBase
+                                        drawRect(
+                                            brush = Brush.verticalGradient(
+                                                0.00f to Color.White,
+                                                0.54f to Color.White,
+                                                0.66f to Color.White.copy(alpha = 0.86f),
+                                                0.78f to Color.White.copy(alpha = 0.48f),
+                                                0.90f to Color.White.copy(alpha = 0.14f),
+                                                1.00f to Color.Transparent
+                                            ),
+                                            blendMode = BlendMode.DstIn
+                                        )
+                                    }
+                            ) {
+                                RezonaAsyncCoverArt(
+                                    coverArtUrl = track.coverArtUrl,
+                                    fallbackIndex = track.index,
+                                    shape = RoundedCornerShape(0.dp),
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                            }
+                        }
                     }
                 }
 
-                // Bottom Shared Control Deck (matches both now_playing.jpg & lyrics.jpg)
-                NowPlayingControlDeck(
-                    bars = bars,
-                    scrubberStyle = scrubberStyle,
-                    currentPositionMs = currentPosition,
-                    durationMs = duration,
-                    isPlaying = isPlaying,
-                    isShuffle = controller.isShuffle.value,
-                    repeatMode = controller.repeatMode.value,
-                    volumeFraction = controller.volume.floatValue,
-                    activePreset = activePreset,
-                    isLyricsMode = isLyricsMode,
-                    sleepSecRemaining = sleepSecRemaining,
-                    sleepEndOfTrack = sleepEndOfTrack,
-                    onSeekFraction = { controller.seekToFraction(it) },
-                    onToggleShuffle = { controller.toggleShuffle() },
-                    onSkipPrev = { controller.skipPrevious() },
-                    onPlayPause = { controller.togglePlayPause() },
-                    onSkipNext = { controller.skipNext() },
-                    onToggleRepeat = { controller.toggleRepeat() },
-                    onVolumeChange = { controller.setVolume(it) },
-                    onSelectPreset = { controller.applySoundPreset(it) },
-                    onToggleLyrics = { isLyricsMode = !isLyricsMode },
-                    onOpenShare = { showShareSheet = true },
-                    onOpenSleepTimer = { showSleepTimerSheet = true }
-                )
-            }
+                // ── 3. MAIN COLUMN (TOP CONTENT + SHARED BOTTOM CONTROL DECK) ────
+                Column(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .navigationBarsPadding(),
+                    verticalArrangement = Arrangement.SpaceBetween
+                ) {
+                    AnimatedContent(
+                        targetState = isLyricsMode,
+                        transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(180)) },
+                        modifier = Modifier.weight(1f),
+                        label = "player_top_mode"
+                    ) { lyricsActive ->
+                        if (lyricsActive) {
+                            RezonaInlineLyricsSection(
+                                controller = controller,
+                                onCollapseToCover = { isLyricsMode = false },
+                                onOpenPosterFromShare = { showPosterStudio = true },
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        } else {
+                            FullBleedCoverTopSection(
+                                track = track,
+                                queueName = controller.activeQueueName.value,
+                                isLiked = isLiked,
+                                palette = artworkPalette,
+                                hasVideoStream = hasVideoStream,
+                                isVideoMode = isVideoMode,
+                                exoPlayerProvider = { controller.getExoPlayer() },
+                                onToggleVideoMode = { enableVideo -> controller.setVideoMode(enableVideo) },
+                                onOpenQueue = { showQueueSheet = true },
+                                onDoubleTapLike = {
+                                    controller.toggleLike()
+                                    showHeartBurst = true
+                                    scope.launch {
+                                        delay(850L)
+                                        showHeartBurst = false
+                                    }
+                                },
+                                onSwipeNext = { controller.skipNext() },
+                                onSwipePrev = { controller.skipPrevious() },
+                                onSwipeDownDelta = { dy ->
+                                    dismissDragY = (dismissDragY + dy).coerceAtLeast(0f)
+                                },
+                                onSwipeDownRelease = {
+                                    if (dismissDragY > 180f) onDismiss()
+                                    dismissDragY = 0f
+                                },
+                                onLikeClick = { controller.toggleLike() },
+                                onMenuClick = { showTrackMenuSheet = true },
+                                modifier = Modifier.fillMaxSize()
+                            )
+                        }
+                    }
 
-            if (showHeartBurst) {
-                HeartBurstOverlay(modifier = Modifier.align(Alignment.Center))
+                    // Bottom Shared Control Deck (Part 1 Tinted Glass + Part 2 4-Icon Bottom Pill)
+                    NowPlayingControlDeck(
+                        bars = bars,
+                        scrubberStyle = scrubberStyle,
+                        currentPositionMs = currentPosition,
+                        durationMs = duration,
+                        isPlaying = isPlaying,
+                        isShuffle = controller.isShuffle.value,
+                        repeatMode = controller.repeatMode.value,
+                        volumeFraction = controller.volume.floatValue,
+                        activePreset = activePreset,
+                        isLyricsMode = isLyricsMode,
+                        isSoundSheetOpen = showSoundSheet,
+                        sleepSecRemaining = sleepSecRemaining,
+                        sleepEndOfTrack = sleepEndOfTrack,
+                        onSeekFraction = { controller.seekToFraction(it) },
+                        onToggleShuffle = { controller.toggleShuffle() },
+                        onSkipPrev = { controller.skipPrevious() },
+                        onPlayPause = { controller.togglePlayPause() },
+                        onSkipNext = { controller.skipNext() },
+                        onToggleRepeat = { controller.toggleRepeat() },
+                        onVolumeChange = { controller.setVolume(it) },
+                        onToggleLyrics = { isLyricsMode = !isLyricsMode },
+                        onOpenShare = { showShareSheet = true },
+                        onOpenSleepTimer = { showSleepTimerSheet = true },
+                        onOpenSoundSheet = { showSoundSheet = true }
+                    )
+                }
+
+                if (showHeartBurst) {
+                    HeartBurstOverlay(modifier = Modifier.align(Alignment.Center))
+                }
             }
+        }
+    }
+
+    if (showSoundSheet) {
+        CompositionLocalProvider(
+            LocalAmbientBaseColor provides artworkPalette.ambientBase,
+            LocalAmbientAccentColor provides artworkPalette.primaryAmbient,
+            LocalTintedGlassColor provides artworkPalette.glassTint
+        ) {
+            RezonaSoundEffectsSheet(
+                activePreset = activePreset,
+                onSelectPreset = { preset -> controller.applySoundPreset(preset) },
+                onDismiss = { showSoundSheet = false }
+            )
         }
     }
 
@@ -411,12 +505,17 @@ fun RezonaExpandedPlayer(
 // FULL-BLEED COVER TOP SECTION (`now_playing.jpg`)
 // ─────────────────────────────────────────────────────────────────────────────
 
+@androidx.annotation.OptIn(UnstableApi::class)
 @Composable
 private fun FullBleedCoverTopSection(
     track: RezonaTrack,
     queueName: String,
     isLiked: Boolean,
-    ambientFadeColor: Color,
+    palette: DynamicArtworkPalette,
+    hasVideoStream: Boolean,
+    isVideoMode: Boolean,
+    exoPlayerProvider: () -> androidx.media3.exoplayer.ExoPlayer?,
+    onToggleVideoMode: (Boolean) -> Unit,
     onOpenQueue: () -> Unit,
     onDoubleTapLike: () -> Unit,
     onSwipeNext: () -> Unit,
@@ -435,7 +534,7 @@ private fun FullBleedCoverTopSection(
         modifier = modifier.fillMaxSize(),
         verticalArrangement = Arrangement.SpaceBetween
     ) {
-        // Full-bleed edge-to-edge cover extending into status bar
+        // Upper Gesture / Video Area (cover itself is drawn full-bleed behind this in parent with DstIn mask!)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -462,43 +561,52 @@ private fun FullBleedCoverTopSection(
                     )
                 }
         ) {
-            RezonaAsyncCoverArt(
-                coverArtUrl = track.coverArtUrl,
-                fallbackIndex = track.index,
-                shape = RoundedCornerShape(0.dp),
-                modifier = Modifier
-                    .fillMaxSize()
-                    .offset { IntOffset(animX.roundToInt(), 0) }
-            )
-
-            // Top contrast scrim so status bar & "Now playing / Mix..." overlay remain legible
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(120.dp)
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(Color(0x9906070A), Color.Transparent)
-                        )
-                    )
-            )
-
-            // Bottom blend gradient into cover dominant dark tone
-            Box(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(140.dp)
-                    .align(Alignment.BottomCenter)
-                    .background(
-                        Brush.verticalGradient(
-                            listOf(
-                                Color.Transparent,
-                                ambientFadeColor.copy(alpha = 0.55f),
-                                Color(0xEA08090C)
+            // Minimal top contrast guard ONLY if cover top strip drops below 4.5:1 against white header
+            if (palette.needsTopContrastScrim && !isVideoMode) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(110.dp)
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(palette.ambientBase.copy(alpha = 0.62f), Color.Transparent)
                             )
                         )
+                )
+            }
+
+            // Part 3: Centered 16:9 Video Surface in Video Mode over continuous ambient background
+            if (isVideoMode) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .aspectRatio(16f / 9f)
+                        .align(Alignment.Center)
+                        .offset { IntOffset(animX.roundToInt(), 0) }
+                        .background(Color.Black)
+                ) {
+                    AndroidView(
+                        factory = { ctx ->
+                            PlayerView(ctx).apply {
+                                useController = false
+                                resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                                setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
+                                player = exoPlayerProvider()
+                            }
+                        },
+                        update = { playerView ->
+                            val activePlayer = exoPlayerProvider()
+                            if (playerView.player != activePlayer) {
+                                playerView.player = activePlayer
+                            }
+                        },
+                        onRelease = { playerView ->
+                            playerView.player = null
+                        },
+                        modifier = Modifier.fillMaxSize()
                     )
-            )
+                }
+            }
 
             // Top-left Queue Header ("Now playing" + bold italic queue name)
             Column(
@@ -512,7 +620,7 @@ private fun FullBleedCoverTopSection(
                 Text(
                     text = "Now playing",
                     style = Typography.bodySmall.copy(fontSize = 12.sp),
-                    color = Color(0xCCFFFFFF)
+                    color = Color(0xD9FFFFFF)
                 )
                 Text(
                     text = queueName,
@@ -526,12 +634,32 @@ private fun FullBleedCoverTopSection(
                     overflow = TextOverflow.Ellipsis
                 )
             }
+
+            // Part 3: Glass Segmented Control "Audio | Video" centered above title row (ONLY when video stream exists)
+            if (hasVideoStream) {
+                AudioVideoSegmentedToggle(
+                    isVideoMode = isVideoMode,
+                    tintedGlass = palette.glassTint,
+                    onSelectVideo = onToggleVideoMode,
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .padding(bottom = 8.dp)
+                )
+            }
         }
 
-        // Below Cover: Title & Artist left-aligned, Heart & 3-dot glass circles right
+        // Minimal contrast guard scrim ONLY if cover fade region contrast drops below 4.5:1
+        val titleRowBg = if (palette.needsFadeContrastScrim && !isVideoMode) {
+            Brush.verticalGradient(listOf(Color.Transparent, palette.ambientBase.copy(alpha = 0.45f)))
+        } else {
+            Brush.verticalGradient(listOf(Color.Transparent, Color.Transparent))
+        }
+
+        // Below Cover: Title & Artist left-aligned, Heart & 3-dot cover-tinted 48dp glass circles right
         Row(
             modifier = Modifier
                 .fillMaxWidth()
+                .background(titleRowBg)
                 .padding(horizontal = 22.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
@@ -552,7 +680,7 @@ private fun FullBleedCoverTopSection(
                 Text(
                     text = track.artist,
                     style = Typography.bodyMedium.copy(fontSize = 15.sp),
-                    color = Color(0xB8FFFFFF),
+                    color = Color(0xCCFFFFFF),
                     maxLines = 1,
                     overflow = TextOverflow.Ellipsis
                 )
@@ -561,7 +689,6 @@ private fun FullBleedCoverTopSection(
             Spacer(modifier = Modifier.width(12.dp))
 
             Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                // 48dp Glass Heart Circle
                 GlassCircleIconButton(
                     iconRes = if (isLiked) R.drawable.ic_heart_filled else R.drawable.ic_heart_outline,
                     tint = if (isLiked) Color(0xFFFF5A6E) else PureWhite,
@@ -571,7 +698,6 @@ private fun FullBleedCoverTopSection(
                         onLikeClick()
                     }
                 )
-                // 48dp Glass Three-Dot Circle
                 GlassCircleIconButton(
                     iconRes = R.drawable.ic_more_vert,
                     tint = PureWhite,
@@ -583,6 +709,93 @@ private fun FullBleedCoverTopSection(
                 )
             }
         }
+    }
+}
+
+@Composable
+private fun AudioVideoSegmentedToggle(
+    isVideoMode: Boolean,
+    tintedGlass: Color,
+    onSelectVideo: (Boolean) -> Unit,
+    modifier: Modifier = Modifier
+) {
+    val shape = CircleShape
+    val view = LocalView.current
+    Row(
+        modifier = modifier
+            .height(44.dp)
+            .clip(shape)
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        lerp(tintedGlass, PureWhite, 0.14f).copy(alpha = 0.44f),
+                        tintedGlass.copy(alpha = 0.34f)
+                    )
+                )
+            )
+            .border(1.dp, SpecularDockBorder, shape)
+            .padding(3.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        SegmentedModePill(
+            label = "Audio",
+            selected = !isVideoMode,
+            tintedGlass = tintedGlass,
+            onClick = {
+                view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                onSelectVideo(false)
+            }
+        )
+        SegmentedModePill(
+            label = "Video",
+            selected = isVideoMode,
+            tintedGlass = tintedGlass,
+            onClick = {
+                view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                onSelectVideo(true)
+            }
+        )
+    }
+}
+
+@Composable
+private fun SegmentedModePill(
+    label: String,
+    selected: Boolean,
+    tintedGlass: Color,
+    onClick: () -> Unit
+) {
+    val pillShape = CircleShape
+    Box(
+        modifier = Modifier
+            .height(38.dp)
+            .clip(pillShape)
+            .then(
+                if (selected) {
+                    Modifier
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(
+                                    lerp(tintedGlass, PureWhite, 0.30f).copy(alpha = 0.62f),
+                                    lerp(tintedGlass, PureWhite, 0.14f).copy(alpha = 0.48f)
+                                )
+                            )
+                        )
+                        .border(0.9.dp, Color(0x66FFFFFF), pillShape)
+                } else Modifier
+            )
+            .clickable(onClick = onClick)
+            .padding(horizontal = 22.dp),
+        contentAlignment = Alignment.Center
+    ) {
+        Text(
+            text = label,
+            style = Typography.labelMedium.copy(
+                fontSize = 13.sp,
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
+            ),
+            color = if (selected) PureWhite else Color(0xCCFFFFFF)
+        )
     }
 }
 
@@ -625,6 +838,7 @@ private fun NowPlayingControlDeck(
     volumeFraction: Float,
     activePreset: SoundPreset,
     isLyricsMode: Boolean,
+    isSoundSheetOpen: Boolean,
     sleepSecRemaining: Int?,
     sleepEndOfTrack: Boolean,
     onSeekFraction: (Float) -> Unit,
@@ -634,10 +848,10 @@ private fun NowPlayingControlDeck(
     onSkipNext: () -> Unit,
     onToggleRepeat: () -> Unit,
     onVolumeChange: (Float) -> Unit,
-    onSelectPreset: (SoundPreset) -> Unit,
     onToggleLyrics: () -> Unit,
     onOpenShare: () -> Unit,
-    onOpenSleepTimer: () -> Unit
+    onOpenSleepTimer: () -> Unit,
+    onOpenSoundSheet: () -> Unit
 ) {
     val progressFraction = if (durationMs > 0) (currentPositionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f) else 0f
     val elapsedStr = remember(currentPositionMs) { formatDuration(currentPositionMs) }
@@ -645,13 +859,13 @@ private fun NowPlayingControlDeck(
         val rem = (durationMs - currentPositionMs).coerceAtLeast(0L)
         "-${formatDuration(rem)}"
     }
-    val view = LocalView.current
+    val tintedGlass = LocalTintedGlassColor.current
 
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 22.dp, vertical = 10.dp),
-        verticalArrangement = Arrangement.spacedBy(10.dp)
+            .padding(horizontal = 22.dp, vertical = 12.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
         // 1. Progress Line (or Waveform Scrubber if chosen in Settings)
         Column(modifier = Modifier.fillMaxWidth()) {
@@ -742,87 +956,37 @@ private fun NowPlayingControlDeck(
             )
         }
 
-        // 4. Sound Presets Row (5 one-tap glass buttons: Slowed + Reverb, Echo, Lo-fi, Nightcore, Concert)
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            SoundPreset.quickRowPresets.forEach { preset ->
-                val isSelected = activePreset == preset
-                val interaction = remember { MutableInteractionSource() }
-                val pressed by interaction.collectIsPressedAsState()
-                val scale by animateFloatAsState(if (pressed) 0.94f else 1f, spring(0.6f, 400f), label = "sp_${preset.id}")
-                val shape = RoundedCornerShape(14.dp)
-
-                Box(
-                    modifier = Modifier
-                        .weight(1f)
-                        .height(42.dp)
-                        .scale(scale)
-                        .clip(shape)
-                        .background(
-                            Brush.verticalGradient(
-                                if (isSelected) listOf(Color(0x40FFFFFF), Color(0x1EFFFFFF))
-                                else listOf(Color(0x1AFFFFFF), Color(0x08FFFFFF))
-                            )
-                        )
-                        .border(
-                            width = if (isSelected) 1.2.dp else 0.75.dp,
-                            brush = Brush.verticalGradient(
-                                if (isSelected) listOf(Color(0xB8FFFFFF), Color(0x38FFFFFF))
-                                else listOf(Color(0x38FFFFFF), Color(0x0DFFFFFF))
-                            ),
-                            shape = shape
-                        )
-                        .clickable(
-                            interactionSource = interaction,
-                            indication = ripple(color = PureWhite),
-                            onClick = {
-                                view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
-                                onSelectPreset(preset)
-                            }
-                        )
-                        .padding(horizontal = 4.dp),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Text(
-                        text = preset.label,
-                        style = Typography.labelSmall.copy(
-                            fontSize = 9.5.sp,
-                            lineHeight = 11.sp,
-                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
-                        ),
-                        color = if (isSelected) PureWhite else Color(0xC0FFFFFF),
-                        textAlign = TextAlign.Center,
-                        maxLines = 2
-                    )
-                }
-            }
-        }
-
-        // 5. Bottom 3-Button Glass Pill: Lyrics | Share | Sleep timer
+        // 4. Bottom 4-Button Cover-Tinted Glass Pill: Lyrics | Share | Sleep timer | Sound
         val timerActive = sleepSecRemaining != null || sleepEndOfTrack
+        val soundPresetActive = activePreset != SoundPreset.NORMAL
         val pillShape = RoundedCornerShape(28.dp)
         Box(
             modifier = Modifier
                 .fillMaxWidth()
-                .height(54.dp)
+                .height(56.dp)
                 .clip(pillShape)
                 .background(
-                    Brush.verticalGradient(listOf(Color(0x22FFFFFF), Color(0x0CFFFFFF)))
+                    Brush.verticalGradient(
+                        listOf(
+                            lerp(tintedGlass, PureWhite, 0.14f).copy(alpha = 0.44f),
+                            tintedGlass.copy(alpha = 0.34f)
+                        )
+                    )
                 )
                 .border(1.dp, SpecularDockBorder, pillShape)
                 .padding(horizontal = 6.dp, vertical = 5.dp)
         ) {
             Row(
                 modifier = Modifier.fillMaxSize(),
-                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
                 BottomPillIconSlot(
                     iconRes = R.drawable.ic_lyrics,
                     isActive = isLyricsMode,
                     badgeText = null,
+                    showIndicatorDot = false,
+                    tintedGlass = tintedGlass,
                     contentDescription = "Lyrics",
                     onClick = onToggleLyrics,
                     modifier = Modifier.weight(1f)
@@ -831,6 +995,8 @@ private fun NowPlayingControlDeck(
                     iconRes = R.drawable.ic_share,
                     isActive = false,
                     badgeText = null,
+                    showIndicatorDot = false,
+                    tintedGlass = tintedGlass,
                     contentDescription = "Share",
                     onClick = onOpenShare,
                     modifier = Modifier.weight(1f)
@@ -847,8 +1013,20 @@ private fun NowPlayingControlDeck(
                     iconRes = R.drawable.ic_timer,
                     isActive = timerActive,
                     badgeText = countdownLabel,
+                    showIndicatorDot = false,
+                    tintedGlass = tintedGlass,
                     contentDescription = "Sleep Timer",
                     onClick = onOpenSleepTimer,
+                    modifier = Modifier.weight(1f)
+                )
+                BottomPillIconSlot(
+                    iconRes = R.drawable.ic_sound_waves,
+                    isActive = isSoundSheetOpen,
+                    badgeText = null,
+                    showIndicatorDot = soundPresetActive,
+                    tintedGlass = tintedGlass,
+                    contentDescription = "Sound Effects",
+                    onClick = onOpenSoundSheet,
                     modifier = Modifier.weight(1f)
                 )
             }
@@ -1008,6 +1186,8 @@ private fun BottomPillIconSlot(
     iconRes: Int,
     isActive: Boolean,
     badgeText: String?,
+    showIndicatorDot: Boolean,
+    tintedGlass: Color,
     contentDescription: String,
     onClick: () -> Unit,
     modifier: Modifier = Modifier
@@ -1021,8 +1201,15 @@ private fun BottomPillIconSlot(
             .then(
                 if (isActive) {
                     Modifier
-                        .background(Brush.verticalGradient(listOf(Color(0x38FFFFFF), Color(0x18FFFFFF))))
-                        .border(1.dp, Color(0x58FFFFFF), capsuleShape)
+                        .background(
+                            Brush.verticalGradient(
+                                listOf(
+                                    lerp(tintedGlass, PureWhite, 0.30f).copy(alpha = 0.62f),
+                                    lerp(tintedGlass, PureWhite, 0.14f).copy(alpha = 0.44f)
+                                )
+                            )
+                        )
+                        .border(1.dp, Color(0x66FFFFFF), capsuleShape)
                 } else Modifier
             )
             .clickable(
@@ -1035,21 +1222,33 @@ private fun BottomPillIconSlot(
             ),
         contentAlignment = Alignment.Center
     ) {
-        Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(5.dp)
-        ) {
-            Icon(
-                painter = painterResource(id = iconRes),
-                contentDescription = contentDescription,
-                tint = if (isActive) PureWhite else Color(0xCCFFFFFF),
-                modifier = Modifier.size(20.dp)
-            )
-            if (!badgeText.isNullOrBlank()) {
-                Text(
-                    text = badgeText,
-                    style = Typography.labelSmall.copy(fontSize = 10.5.sp, fontWeight = FontWeight.Bold),
-                    color = PureWhite
+        Box(contentAlignment = Alignment.Center) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(5.dp)
+            ) {
+                Icon(
+                    painter = painterResource(id = iconRes),
+                    contentDescription = contentDescription,
+                    tint = if (isActive || showIndicatorDot) PureWhite else Color(0xCCFFFFFF),
+                    modifier = Modifier.size(20.dp)
+                )
+                if (!badgeText.isNullOrBlank()) {
+                    Text(
+                        text = badgeText,
+                        style = Typography.labelSmall.copy(fontSize = 10.5.sp, fontWeight = FontWeight.Bold),
+                        color = PureWhite
+                    )
+                }
+            }
+            if (showIndicatorDot) {
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopEnd)
+                        .offset(x = 6.dp, y = (-4).dp)
+                        .size(6.dp)
+                        .clip(CircleShape)
+                        .background(PureWhite)
                 )
             }
         }
@@ -1437,14 +1636,22 @@ private fun AmbientCalmCoverOverlay(
         animationSpec = infiniteRepeatable(tween(4200, easing = FastOutSlowInEasing), AnimRepeatMode.Reverse),
         label = "pulse_scale"
     )
-    val (p, s, t) = remember(track.id) { deriveAmbientColors(track) }
+    val context = LocalContext.current
+    val pal = rememberAnimatedArtworkPalette(context, track.coverArtUrl, track.id)
 
     Box(
         modifier = Modifier
             .fillMaxSize()
             .clickable(onClick = onDismiss)
     ) {
-        RezonaContinuousAmbientLayer(p, s, t, vividMode = true, modifier = Modifier.fillMaxSize())
+        RezonaContinuousAmbientLayer(
+            primaryColor = pal.primaryAmbient,
+            secondaryColor = pal.secondaryAmbient,
+            tertiaryColor = pal.tertiaryAmbient,
+            ambientBase = pal.ambientBase,
+            vividMode = true,
+            modifier = Modifier.fillMaxSize()
+        )
         Column(
             modifier = Modifier
                 .fillMaxSize()

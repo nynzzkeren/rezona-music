@@ -8,6 +8,10 @@ plugins {
   alias(libs.plugins.ksp)
 }
 
+if (file("google-services.json").exists()) {
+  apply(plugin = "com.google.gms.google-services")
+}
+
 val keystorePropertiesFile = rootProject.file("keystore.properties")
 val keystoreProperties = Properties()
 if (keystorePropertiesFile.exists()) {
@@ -136,6 +140,21 @@ dependencies {
   // Liquid Glass & Hardware-Accelerated Blur
   implementation(libs.haze)
   implementation(libs.haze.materials)
+
+  // Firebase (Auth, Firestore, App Check Play Integrity) & Coroutines Play Services
+  implementation(platform(libs.firebase.bom))
+  implementation(libs.firebase.auth)
+  implementation(libs.firebase.firestore)
+  implementation(libs.firebase.appcheck.playintegrity)
+  implementation(libs.kotlinx.coroutines.play.services)
+
+  // Credential Manager & Google ID (Sign in with Google)
+  implementation(libs.androidx.credentials)
+  implementation(libs.androidx.credentials.play.services.auth)
+  implementation(libs.googleid)
+
+  // Background Offline-First Sync
+  implementation(libs.androidx.work.runtime.ktx)
 
   // Local tests: jUnit, coroutines, Android runner
   testImplementation(libs.junit)

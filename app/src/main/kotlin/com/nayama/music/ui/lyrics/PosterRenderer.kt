@@ -56,7 +56,8 @@ object PosterRenderer {
         isBold: Boolean,
         isCentered: Boolean,
         showThumbnail: Boolean,
-        showWatermark: Boolean
+        showWatermark: Boolean,
+        customLyricsStyle: LyricsStyleConfig? = null
     ): Bitmap {
         val width = format.width
         val height = format.height
@@ -109,14 +110,24 @@ object PosterRenderer {
             }
         }
 
-        // 2. Resolve Typeface
-        val baseTypeface = when (font) {
-            PosterFont.EDITORIAL, PosterFont.SERIF -> Typeface.SERIF
-            PosterFont.ROUNDED -> Typeface.DEFAULT
-            PosterFont.GROTESK -> Typeface.SANS_SERIF
+        // 2. Resolve Typeface (applies Part 5 LyricsStyleConfig bundled font when set)
+        val typeface = if (customLyricsStyle != null) {
+            val useBold = isBold || customLyricsStyle.weight == LyricsFontWeightOption.BOLD ||
+                customLyricsStyle.weight == LyricsFontWeightOption.BLACK
+            customLyricsStyle.fontFamily.loadAndroidTypeface(
+                context = context,
+                isBold = useBold,
+                isItalic = customLyricsStyle.isItalic
+            )
+        } else {
+            val baseTypeface = when (font) {
+                PosterFont.EDITORIAL, PosterFont.SERIF -> Typeface.SERIF
+                PosterFont.ROUNDED -> Typeface.DEFAULT
+                PosterFont.GROTESK -> Typeface.SANS_SERIF
+            }
+            val typefaceStyle = if (isBold) Typeface.BOLD else Typeface.NORMAL
+            Typeface.create(baseTypeface, typefaceStyle)
         }
-        val typefaceStyle = if (isBold) Typeface.BOLD else Typeface.NORMAL
-        val typeface = Typeface.create(baseTypeface, typefaceStyle)
 
         // 3. Draw Track Header / Thumbnail
         val contentPadding = 100f

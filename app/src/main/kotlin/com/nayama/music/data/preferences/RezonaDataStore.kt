@@ -12,10 +12,8 @@ import androidx.datastore.preferences.preferencesDataStore
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
-import kotlinx.serialization.Serializable
 import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
-import java.security.MessageDigest
 
 val Context.dataStore: DataStore<Preferences> by preferencesDataStore(name = "rezona_settings")
 
@@ -54,6 +52,17 @@ class RezonaPreferences(private val context: Context) {
         val KEY_LYRICS_BLUR_UNFOCUSED = booleanPreferencesKey("lyrics_blur_unfocused")
         val KEY_LYRICS_CENTER_ALIGN = booleanPreferencesKey("lyrics_center_align")
         val KEY_LYRICS_OFFSET_MS = intPreferencesKey("lyrics_timing_offset_ms")
+        val KEY_LYRICS_FONT_FAMILY = stringPreferencesKey("lyrics_font_family")
+        val KEY_LYRICS_FONT_WEIGHT = stringPreferencesKey("lyrics_font_weight")
+        val KEY_LYRICS_FONT_SIZE_SP = floatPreferencesKey("lyrics_font_size_sp")
+        val KEY_LYRICS_LINE_SPACING = stringPreferencesKey("lyrics_line_spacing")
+        val KEY_LYRICS_ITALIC = booleanPreferencesKey("lyrics_italic")
+        val KEY_LYRICS_LETTER_SPACING = floatPreferencesKey("lyrics_letter_spacing_em")
+        val KEY_LYRICS_TRANSLATION_SIZE_SP = floatPreferencesKey("lyrics_translation_size_sp")
+
+        // Video Playback Settings (Part 3)
+        val KEY_VIDEO_QUALITY = stringPreferencesKey("video_stream_quality")
+        val KEY_VIDEO_HQ_WIFI_ONLY = booleanPreferencesKey("video_hq_wifi_only")
 
         // Privacy & History
         val KEY_PAUSE_HISTORY = booleanPreferencesKey("privacy_pause_history")
@@ -66,32 +75,38 @@ class RezonaPreferences(private val context: Context) {
         // One-time v2 seed clutter cleanup
         val KEY_CLEANED_DEFAULT_SEEDS_V2 = booleanPreferencesKey("db_cleaned_default_seeds_v2")
 
-        // Auth & Account Identity (On-device Google picker + Email Sign-Up / Sign-In)
+        // Auth & Account Identity (Firebase Auth UID + Guest State)
         val KEY_AUTH_GATE_SEEN = booleanPreferencesKey("auth_gate_seen")
         val KEY_AUTH_PROVIDER = stringPreferencesKey("auth_provider")
+        val KEY_FIREBASE_UID = stringPreferencesKey("auth_firebase_uid")
         val KEY_GOOGLE_SIGNED_IN = booleanPreferencesKey("auth_google_signed_in")
         val KEY_GOOGLE_EMAIL = stringPreferencesKey("auth_google_email")
         val KEY_GOOGLE_DISPLAY_NAME = stringPreferencesKey("auth_google_display_name")
-        val KEY_REGISTERED_ACCOUNTS_JSON = stringPreferencesKey("auth_registered_accounts_json")
-    }
 
-    @Serializable
-    data class RegisteredLocalAccount(
-        val email: String,
-        val displayName: String,
-        val passwordHash: String
-    )
+        // Cloud Sync Status Metadata
+        val KEY_LAST_SYNC_PUSH_MS = stringPreferencesKey("sync_last_push_ms")
+        val KEY_LAST_SYNC_PULL_MS = stringPreferencesKey("sync_last_pull_ms")
+        val KEY_LAST_SYNC_ERROR = stringPreferencesKey("sync_last_error")
+        val KEY_SETTINGS_UPDATED_AT = stringPreferencesKey("sync_settings_updated_at")
+        val KEY_HANDLED_GUEST_UIDS_JSON = stringPreferencesKey("sync_handled_guest_uids")
 
-    sealed class AccountAuthResult {
-        data class Success(val email: String, val displayName: String) : AccountAuthResult()
-        data class Error(val message: String) : AccountAuthResult()
+        @Volatile
+        var onSettingsMutated: (() -> Unit)? = null
     }
 
     data class GoogleAccountState(
         val isSignedIn: Boolean = false,
+        val uid: String = "",
         val email: String = "",
         val displayName: String = "",
         val provider: String = "guest"
+    )
+
+    data class SyncPrefsMetadata(
+        val lastPushAtMs: Long = 0L,
+        val lastPullAtMs: Long = 0L,
+        val lastError: String? = null,
+        val settingsUpdatedAtMs: Long = 0L
     )
 
     private val authJson = Json { ignoreUnknownKeys = true }
@@ -106,14 +121,25 @@ class RezonaPreferences(private val context: Context) {
 
     val googleAccountFlow: Flow<GoogleAccountState> = context.dataStore.data.map { prefs ->
         val signedIn = prefs[KEY_GOOGLE_SIGNED_IN] ?: false
+        val uid = prefs[KEY_FIREBASE_UID].orEmpty()
         val email = prefs[KEY_GOOGLE_EMAIL].orEmpty()
         val name = prefs[KEY_GOOGLE_DISPLAY_NAME].orEmpty()
-        val provider = prefs[KEY_AUTH_PROVIDER] ?: if (signedIn && email.isNotBlank()) "google" else "guest"
+        val provider = prefs[KEY_AUTH_PROVIDER] ?: if (signedIn && uid.isNotBlank()) "firebase" else "guest"
         GoogleAccountState(
-            isSignedIn = signedIn && email.isNotBlank(),
+            isSignedIn = signedIn && uid.isNotBlank(),
+            uid = uid,
             email = email,
             displayName = name,
             provider = provider
+        )
+    }
+
+    val syncMetadataFlow: Flow<SyncPrefsMetadata> = context.dataStore.data.map { prefs ->
+        SyncPrefsMetadata(
+            lastPushAtMs = prefs[KEY_LAST_SYNC_PUSH_MS]?.toLongOrNull() ?: 0L,
+            lastPullAtMs = prefs[KEY_LAST_SYNC_PULL_MS]?.toLongOrNull() ?: 0L,
+            lastError = prefs[KEY_LAST_SYNC_ERROR]?.takeIf { it.isNotBlank() },
+            settingsUpdatedAtMs = prefs[KEY_SETTINGS_UPDATED_AT]?.toLongOrNull() ?: 0L
         )
     }
 
@@ -195,6 +221,27 @@ class RezonaPreferences(private val context: Context) {
         prefs[KEY_LYRICS_OFFSET_MS] ?: 0
     }
 
+    val lyricsStyleFlow: Flow<com.nayama.music.ui.lyrics.LyricsStyleConfig> = context.dataStore.data.map { prefs ->
+        com.nayama.music.ui.lyrics.LyricsStyleConfig(
+            fontFamily = com.nayama.music.ui.lyrics.LyricsFontFamilyOption.fromId(prefs[KEY_LYRICS_FONT_FAMILY]),
+            weight = com.nayama.music.ui.lyrics.LyricsFontWeightOption.fromId(prefs[KEY_LYRICS_FONT_WEIGHT]),
+            fontSizeSp = (prefs[KEY_LYRICS_FONT_SIZE_SP] ?: 26f).coerceIn(20f, 40f),
+            centerAlign = prefs[KEY_LYRICS_CENTER_ALIGN] ?: false,
+            lineSpacing = com.nayama.music.ui.lyrics.LyricsLineSpacingOption.fromId(prefs[KEY_LYRICS_LINE_SPACING]),
+            isItalic = prefs[KEY_LYRICS_ITALIC] ?: false,
+            letterSpacingEm = (prefs[KEY_LYRICS_LETTER_SPACING] ?: -0.01f).coerceIn(-0.04f, 0.12f),
+            translationSizeSp = (prefs[KEY_LYRICS_TRANSLATION_SIZE_SP] ?: 14f).coerceIn(11f, 22f)
+        )
+    }
+
+    val videoQualityFlow: Flow<String> = context.dataStore.data.map { prefs ->
+        prefs[KEY_VIDEO_QUALITY] ?: "480p"
+    }
+
+    val videoHqWifiOnlyFlow: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[KEY_VIDEO_HQ_WIFI_ONLY] ?: true
+    }
+
     val pauseHistoryFlow: Flow<Boolean> = context.dataStore.data.map { prefs ->
         prefs[KEY_PAUSE_HISTORY] ?: false
     }
@@ -215,163 +262,194 @@ class RezonaPreferences(private val context: Context) {
         context.dataStore.edit { prefs -> prefs[KEY_CLEANED_DEFAULT_SEEDS_V2] = true }
     }
 
-    suspend fun setLayoutMode(mode: LibraryLayoutMode) {
-        context.dataStore.edit { prefs -> prefs[KEY_LAYOUT_MODE] = mode.name }
-    }
-
-    suspend fun setSortOrder(order: LibrarySortOrder) {
-        context.dataStore.edit { prefs -> prefs[KEY_SORT_ORDER] = order.name }
-    }
-
-    suspend fun setFilterTab(tab: String) {
-        context.dataStore.edit { prefs -> prefs[KEY_FILTER_TAB] = tab }
-    }
-
-    suspend fun setCrossfadeSeconds(seconds: Int) {
-        context.dataStore.edit { prefs -> prefs[KEY_CROSSFADE_SECONDS] = seconds }
-    }
-
-    suspend fun setGaplessEnabled(enabled: Boolean) {
-        context.dataStore.edit { prefs -> prefs[KEY_GAPLESS_ENABLED] = enabled }
-    }
-
-    suspend fun setAudioQuality(quality: String) {
-        context.dataStore.edit { prefs -> prefs[KEY_AUDIO_QUALITY] = quality }
-    }
-
-    suspend fun setCacheLimitMb(limitMb: Int) {
-        context.dataStore.edit { prefs -> prefs[KEY_CACHE_LIMIT_MB] = limitMb }
-    }
-
-    suspend fun setImageCacheLimitMb(limitMb: Int) {
-        context.dataStore.edit { prefs -> prefs[KEY_IMAGE_CACHE_LIMIT_MB] = limitMb }
-    }
-
-    suspend fun setSoundPreset(preset: String) {
-        context.dataStore.edit { prefs -> prefs[KEY_SOUND_PRESET] = preset }
-    }
-
-    suspend fun setScrubberStyle(style: String) {
-        context.dataStore.edit { prefs -> prefs[KEY_SCRUBBER_STYLE] = style }
-    }
-
-    suspend fun setGlassIntensity(intensity: String) {
-        context.dataStore.edit { prefs -> prefs[KEY_GLASS_INTENSITY] = intensity }
-    }
-
-    suspend fun setAmbientVividPlayer(enabled: Boolean) {
-        context.dataStore.edit { prefs -> prefs[KEY_AMBIENT_VIVID_PLAYER] = enabled }
-    }
-
-    suspend fun setDockFoldOnScroll(enabled: Boolean) {
-        context.dataStore.edit { prefs -> prefs[KEY_DOCK_FOLD_ON_SCROLL] = enabled }
-    }
-
-    suspend fun setLyricsTranslationEnabled(enabled: Boolean) {
-        context.dataStore.edit { prefs -> prefs[KEY_LYRICS_TRANSLATION_ENABLED] = enabled }
-    }
-
-    suspend fun setLyricsRomanizationEnabled(enabled: Boolean) {
-        context.dataStore.edit { prefs -> prefs[KEY_LYRICS_ROMANIZATION_ENABLED] = enabled }
-    }
-
-    suspend fun setLyricsBlurUnfocused(enabled: Boolean) {
-        context.dataStore.edit { prefs -> prefs[KEY_LYRICS_BLUR_UNFOCUSED] = enabled }
-    }
-
-    suspend fun setLyricsCenterAlign(enabled: Boolean) {
-        context.dataStore.edit { prefs -> prefs[KEY_LYRICS_CENTER_ALIGN] = enabled }
-    }
-
-    suspend fun setLyricsOffsetMs(offsetMs: Int) {
-        context.dataStore.edit { prefs -> prefs[KEY_LYRICS_OFFSET_MS] = offsetMs }
-    }
-
-    suspend fun setPauseHistory(paused: Boolean) {
-        context.dataStore.edit { prefs -> prefs[KEY_PAUSE_HISTORY] = paused }
-    }
-
-    suspend fun setMoodDialAngle(angle: Float) {
-        context.dataStore.edit { prefs -> prefs[KEY_MOOD_DIAL_ANGLE] = angle }
-    }
-
-    suspend fun setEchoProfile(profile: String) {
-        context.dataStore.edit { prefs -> prefs[KEY_ECHO_PROFILE] = profile }
-    }
-
-    suspend fun setEchoIntensity(intensity: Float) {
-        context.dataStore.edit { prefs -> prefs[KEY_ECHO_INTENSITY] = intensity }
-    }
-
-    private fun hashPassword(email: String, password: String): String {
-        val digest = MessageDigest.getInstance("SHA-256")
-            .digest("${email.lowercase().trim()}:$password".toByteArray(Charsets.UTF_8))
-        return digest.joinToString("") { "%02x".format(it) }
-    }
-
-    private fun decodeAccounts(raw: String?): List<RegisteredLocalAccount> {
-        if (raw.isNullOrBlank()) return emptyList()
-        return runCatching { authJson.decodeFromString<List<RegisteredLocalAccount>>(raw) }
-            .getOrDefault(emptyList())
-    }
-
-    suspend fun signUpWithEmail(name: String, email: String, password: String): AccountAuthResult {
-        val cleanEmail = email.trim().lowercase()
-        val cleanName = name.trim().ifBlank { deriveNameFromEmail(cleanEmail) }
-        if (!cleanEmail.contains("@") || !cleanEmail.contains(".")) {
-            return AccountAuthResult.Error("Enter a valid email address.")
-        }
-        if (password.length < 6) {
-            return AccountAuthResult.Error("Password must be at least 6 characters.")
-        }
-        val currentPrefs = context.dataStore.data.first()
-        val accounts = decodeAccounts(currentPrefs[KEY_REGISTERED_ACCOUNTS_JSON]).toMutableList()
-        if (accounts.any { it.email.equals(cleanEmail, ignoreCase = true) }) {
-            return AccountAuthResult.Error("An account with this email already exists. Please sign in.")
-        }
-        val hash = hashPassword(cleanEmail, password)
-        accounts.add(RegisteredLocalAccount(email = cleanEmail, displayName = cleanName, passwordHash = hash))
+    private suspend fun editSyncedSetting(block: (androidx.datastore.preferences.core.MutablePreferences) -> Unit) {
         context.dataStore.edit { prefs ->
-            prefs[KEY_REGISTERED_ACCOUNTS_JSON] = authJson.encodeToString(accounts)
-            prefs[KEY_AUTH_GATE_SEEN] = true
-            prefs[KEY_AUTH_PROVIDER] = "email"
-            prefs[KEY_GOOGLE_SIGNED_IN] = true
-            prefs[KEY_GOOGLE_EMAIL] = cleanEmail
-            prefs[KEY_GOOGLE_DISPLAY_NAME] = cleanName
+            block(prefs)
+            prefs[KEY_SETTINGS_UPDATED_AT] = System.currentTimeMillis().toString()
         }
-        return AccountAuthResult.Success(cleanEmail, cleanName)
+        onSettingsMutated?.invoke()
     }
 
-    suspend fun signInWithEmail(email: String, password: String): AccountAuthResult {
-        val cleanEmail = email.trim().lowercase()
-        if (!cleanEmail.contains("@") || password.isBlank()) {
-            return AccountAuthResult.Error("Enter both your email and password.")
-        }
-        val currentPrefs = context.dataStore.data.first()
-        val accounts = decodeAccounts(currentPrefs[KEY_REGISTERED_ACCOUNTS_JSON])
-        val match = accounts.firstOrNull { it.email.equals(cleanEmail, ignoreCase = true) }
-            ?: return AccountAuthResult.Error("No local account found for $cleanEmail. Please sign up first.")
-        val hash = hashPassword(cleanEmail, password)
-        if (match.passwordHash != hash) {
-            return AccountAuthResult.Error("Incorrect password.")
-        }
+    suspend fun setLayoutMode(mode: LibraryLayoutMode) = editSyncedSetting { it[KEY_LAYOUT_MODE] = mode.name }
+
+    suspend fun setSortOrder(order: LibrarySortOrder) = editSyncedSetting { it[KEY_SORT_ORDER] = order.name }
+
+    suspend fun setFilterTab(tab: String) = editSyncedSetting { it[KEY_FILTER_TAB] = tab }
+
+    suspend fun setCrossfadeSeconds(seconds: Int) = editSyncedSetting { it[KEY_CROSSFADE_SECONDS] = seconds }
+
+    suspend fun setGaplessEnabled(enabled: Boolean) = editSyncedSetting { it[KEY_GAPLESS_ENABLED] = enabled }
+
+    suspend fun setAudioQuality(quality: String) = editSyncedSetting { it[KEY_AUDIO_QUALITY] = quality }
+
+    suspend fun setCacheLimitMb(limitMb: Int) = editSyncedSetting { it[KEY_CACHE_LIMIT_MB] = limitMb }
+
+    suspend fun setImageCacheLimitMb(limitMb: Int) = editSyncedSetting { it[KEY_IMAGE_CACHE_LIMIT_MB] = limitMb }
+
+    suspend fun setSoundPreset(preset: String) = editSyncedSetting { it[KEY_SOUND_PRESET] = preset }
+
+    suspend fun setScrubberStyle(style: String) = editSyncedSetting { it[KEY_SCRUBBER_STYLE] = style }
+
+    suspend fun setGlassIntensity(intensity: String) = editSyncedSetting { it[KEY_GLASS_INTENSITY] = intensity }
+
+    suspend fun setAmbientVividPlayer(enabled: Boolean) = editSyncedSetting { it[KEY_AMBIENT_VIVID_PLAYER] = enabled }
+
+    suspend fun setDockFoldOnScroll(enabled: Boolean) = editSyncedSetting { it[KEY_DOCK_FOLD_ON_SCROLL] = enabled }
+
+    suspend fun setLyricsTranslationEnabled(enabled: Boolean) = editSyncedSetting { it[KEY_LYRICS_TRANSLATION_ENABLED] = enabled }
+
+    suspend fun setLyricsRomanizationEnabled(enabled: Boolean) = editSyncedSetting { it[KEY_LYRICS_ROMANIZATION_ENABLED] = enabled }
+
+    suspend fun setLyricsBlurUnfocused(enabled: Boolean) = editSyncedSetting { it[KEY_LYRICS_BLUR_UNFOCUSED] = enabled }
+
+    suspend fun setLyricsCenterAlign(enabled: Boolean) = editSyncedSetting { it[KEY_LYRICS_CENTER_ALIGN] = enabled }
+
+    suspend fun setLyricsOffsetMs(offsetMs: Int) = editSyncedSetting { it[KEY_LYRICS_OFFSET_MS] = offsetMs }
+
+    suspend fun setLyricsStyle(style: com.nayama.music.ui.lyrics.LyricsStyleConfig) {
         context.dataStore.edit { prefs ->
-            prefs[KEY_AUTH_GATE_SEEN] = true
-            prefs[KEY_AUTH_PROVIDER] = "email"
-            prefs[KEY_GOOGLE_SIGNED_IN] = true
-            prefs[KEY_GOOGLE_EMAIL] = match.email
-            prefs[KEY_GOOGLE_DISPLAY_NAME] = match.displayName
+            prefs[KEY_LYRICS_FONT_FAMILY] = style.fontFamily.id
+            prefs[KEY_LYRICS_FONT_WEIGHT] = style.weight.id
+            prefs[KEY_LYRICS_FONT_SIZE_SP] = style.fontSizeSp.coerceIn(20f, 40f)
+            prefs[KEY_LYRICS_CENTER_ALIGN] = style.centerAlign
+            prefs[KEY_LYRICS_LINE_SPACING] = style.lineSpacing.id
+            prefs[KEY_LYRICS_ITALIC] = style.isItalic
+            prefs[KEY_LYRICS_LETTER_SPACING] = style.letterSpacingEm.coerceIn(-0.04f, 0.12f)
+            prefs[KEY_LYRICS_TRANSLATION_SIZE_SP] = style.translationSizeSp.coerceIn(11f, 22f)
         }
-        return AccountAuthResult.Success(match.email, match.displayName)
     }
 
-    suspend fun setGoogleAccount(email: String, displayName: String) {
+    suspend fun resetLyricsStyle() = setLyricsStyle(com.nayama.music.ui.lyrics.LyricsStyleConfig())
+
+    suspend fun setVideoQuality(quality: String) {
+        context.dataStore.edit { it[KEY_VIDEO_QUALITY] = quality }
+    }
+
+    suspend fun setVideoHqWifiOnly(enabled: Boolean) {
+        context.dataStore.edit { it[KEY_VIDEO_HQ_WIFI_ONLY] = enabled }
+    }
+
+    suspend fun setPauseHistory(paused: Boolean) = editSyncedSetting { it[KEY_PAUSE_HISTORY] = paused }
+
+    suspend fun setMoodDialAngle(angle: Float) = editSyncedSetting { it[KEY_MOOD_DIAL_ANGLE] = angle }
+
+    suspend fun setEchoProfile(profile: String) = editSyncedSetting { it[KEY_ECHO_PROFILE] = profile }
+
+    suspend fun setEchoIntensity(intensity: Float) = editSyncedSetting { it[KEY_ECHO_INTENSITY] = intensity }
+
+    suspend fun exportSettingsForCloudSync(updatedAt: Long = System.currentTimeMillis()): Map<String, Any> {
+        val prefs = context.dataStore.data.first()
+        val effectiveUpdated = (prefs[KEY_SETTINGS_UPDATED_AT]?.toLongOrNull() ?: updatedAt).coerceAtLeast(1L)
+        return linkedMapOf(
+            "updatedAt" to effectiveUpdated,
+            "schemaVersion" to 1,
+            "deleted" to false,
+            "libraryLayoutMode" to (prefs[KEY_LAYOUT_MODE] ?: LibraryLayoutMode.GRID.name).take(32),
+            "librarySortOrder" to (prefs[KEY_SORT_ORDER] ?: LibrarySortOrder.RECENT.name).take(32),
+            "libraryFilterTab" to (prefs[KEY_FILTER_TAB] ?: "All").take(64),
+            "audioCrossfadeSeconds" to (prefs[KEY_CROSSFADE_SECONDS] ?: 4).coerceIn(0, 30),
+            "audioGaplessEnabled" to (prefs[KEY_GAPLESS_ENABLED] ?: true),
+            "audioQuality" to (prefs[KEY_AUDIO_QUALITY] ?: "High").take(32),
+            "cacheLimitMb" to (prefs[KEY_CACHE_LIMIT_MB] ?: 1024).coerceIn(0, 102400),
+            "imageCacheLimitMb" to (prefs[KEY_IMAGE_CACHE_LIMIT_MB] ?: 256).coerceIn(0, 10240),
+            "soundPreset" to (prefs[KEY_SOUND_PRESET] ?: "Normal").take(64),
+            "scrubberStyle" to (prefs[KEY_SCRUBBER_STYLE] ?: "Line").take(32),
+            "glassIntensity" to (prefs[KEY_GLASS_INTENSITY] ?: "Low").take(32),
+            "ambientVividPlayer" to (prefs[KEY_AMBIENT_VIVID_PLAYER] ?: true),
+            "dockFoldOnScroll" to (prefs[KEY_DOCK_FOLD_ON_SCROLL] ?: true),
+            "lyricsTranslationEnabled" to (prefs[KEY_LYRICS_TRANSLATION_ENABLED] ?: true),
+            "lyricsRomanizationEnabled" to (prefs[KEY_LYRICS_ROMANIZATION_ENABLED] ?: false),
+            "lyricsBlurUnfocused" to (prefs[KEY_LYRICS_BLUR_UNFOCUSED] ?: true),
+            "lyricsCenterAlign" to (prefs[KEY_LYRICS_CENTER_ALIGN] ?: false),
+            "lyricsOffsetMs" to (prefs[KEY_LYRICS_OFFSET_MS] ?: 0).coerceIn(-60000, 60000),
+            "pauseHistory" to (prefs[KEY_PAUSE_HISTORY] ?: false),
+            "moodDialAngle" to (prefs[KEY_MOOD_DIAL_ANGLE] ?: 0f).toDouble(),
+            "echoProfile" to (prefs[KEY_ECHO_PROFILE] ?: "Intimate Studio").take(64),
+            "echoIntensity" to (prefs[KEY_ECHO_INTENSITY] ?: 0.35f).toDouble()
+        )
+    }
+
+    suspend fun applySyncedSettingsFromCloud(data: Map<String, Any?>): Boolean {
+        val remoteUpdatedAt = (data["updatedAt"] as? Number)?.toLong() ?: return false
+        val currentPrefs = context.dataStore.data.first()
+        val localUpdatedAt = currentPrefs[KEY_SETTINGS_UPDATED_AT]?.toLongOrNull() ?: 0L
+        if (remoteUpdatedAt <= localUpdatedAt) return false
+
+        context.dataStore.edit { prefs ->
+            prefs[KEY_SETTINGS_UPDATED_AT] = remoteUpdatedAt.toString()
+            (data["libraryLayoutMode"] as? String)?.let { prefs[KEY_LAYOUT_MODE] = it }
+            (data["librarySortOrder"] as? String)?.let { prefs[KEY_SORT_ORDER] = it }
+            (data["libraryFilterTab"] as? String)?.let { prefs[KEY_FILTER_TAB] = it }
+            (data["audioCrossfadeSeconds"] as? Number)?.toInt()?.let { prefs[KEY_CROSSFADE_SECONDS] = it.coerceIn(0, 30) }
+            (data["audioGaplessEnabled"] as? Boolean)?.let { prefs[KEY_GAPLESS_ENABLED] = it }
+            (data["audioQuality"] as? String)?.let { prefs[KEY_AUDIO_QUALITY] = it }
+            (data["cacheLimitMb"] as? Number)?.toInt()?.let { prefs[KEY_CACHE_LIMIT_MB] = it.coerceIn(0, 102400) }
+            (data["imageCacheLimitMb"] as? Number)?.toInt()?.let { prefs[KEY_IMAGE_CACHE_LIMIT_MB] = it.coerceIn(0, 10240) }
+            (data["soundPreset"] as? String)?.let { prefs[KEY_SOUND_PRESET] = it }
+            (data["scrubberStyle"] as? String)?.let { prefs[KEY_SCRUBBER_STYLE] = it }
+            (data["glassIntensity"] as? String)?.let { prefs[KEY_GLASS_INTENSITY] = it }
+            (data["ambientVividPlayer"] as? Boolean)?.let { prefs[KEY_AMBIENT_VIVID_PLAYER] = it }
+            (data["dockFoldOnScroll"] as? Boolean)?.let { prefs[KEY_DOCK_FOLD_ON_SCROLL] = it }
+            (data["lyricsTranslationEnabled"] as? Boolean)?.let { prefs[KEY_LYRICS_TRANSLATION_ENABLED] = it }
+            (data["lyricsRomanizationEnabled"] as? Boolean)?.let { prefs[KEY_LYRICS_ROMANIZATION_ENABLED] = it }
+            (data["lyricsBlurUnfocused"] as? Boolean)?.let { prefs[KEY_LYRICS_BLUR_UNFOCUSED] = it }
+            (data["lyricsCenterAlign"] as? Boolean)?.let { prefs[KEY_LYRICS_CENTER_ALIGN] = it }
+            (data["lyricsOffsetMs"] as? Number)?.toInt()?.let { prefs[KEY_LYRICS_OFFSET_MS] = it.coerceIn(-60000, 60000) }
+            (data["pauseHistory"] as? Boolean)?.let { prefs[KEY_PAUSE_HISTORY] = it }
+            (data["moodDialAngle"] as? Number)?.toFloat()?.let { prefs[KEY_MOOD_DIAL_ANGLE] = it }
+            (data["echoProfile"] as? String)?.let { prefs[KEY_ECHO_PROFILE] = it }
+            (data["echoIntensity"] as? Number)?.toFloat()?.let { prefs[KEY_ECHO_INTENSITY] = it }
+        }
+        return true
+    }
+
+    suspend fun recordSyncPushSuccess(timestampMs: Long = System.currentTimeMillis()) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_LAST_SYNC_PUSH_MS] = timestampMs.toString()
+            prefs.remove(KEY_LAST_SYNC_ERROR)
+        }
+    }
+
+    suspend fun recordSyncPullSuccess(timestampMs: Long = System.currentTimeMillis()) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_LAST_SYNC_PULL_MS] = timestampMs.toString()
+            prefs.remove(KEY_LAST_SYNC_ERROR)
+        }
+    }
+
+    suspend fun recordSyncError(message: String) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_LAST_SYNC_ERROR] = message.take(500)
+        }
+    }
+
+    suspend fun hasHandledGuestMergeForUid(uid: String): Boolean {
+        if (uid.isBlank()) return true
+        val raw = context.dataStore.data.first()[KEY_HANDLED_GUEST_UIDS_JSON] ?: return false
+        val list = runCatching { authJson.decodeFromString<List<String>>(raw) }.getOrDefault(emptyList())
+        return uid in list
+    }
+
+    suspend fun markGuestMergeHandledForUid(uid: String) {
+        if (uid.isBlank()) return
+        context.dataStore.edit { prefs ->
+            val current = prefs[KEY_HANDLED_GUEST_UIDS_JSON]
+                ?.let { runCatching { authJson.decodeFromString<List<String>>(it) }.getOrDefault(emptyList()) }
+                .orEmpty()
+                .toMutableSet()
+            current.add(uid)
+            prefs[KEY_HANDLED_GUEST_UIDS_JSON] = authJson.encodeToString(current.toList())
+        }
+    }
+
+    suspend fun setFirebaseSignedInState(uid: String, email: String, displayName: String, provider: String) {
         val cleanEmail = email.trim()
         val derivedName = displayName.ifBlank { deriveNameFromEmail(cleanEmail) }
         context.dataStore.edit { prefs ->
             prefs[KEY_AUTH_GATE_SEEN] = true
-            prefs[KEY_AUTH_PROVIDER] = "google"
-            prefs[KEY_GOOGLE_SIGNED_IN] = true
+            prefs[KEY_FIREBASE_UID] = uid
+            prefs[KEY_AUTH_PROVIDER] = provider
+            prefs[KEY_GOOGLE_SIGNED_IN] = uid.isNotBlank()
             prefs[KEY_GOOGLE_EMAIL] = cleanEmail
             prefs[KEY_GOOGLE_DISPLAY_NAME] = derivedName
         }
@@ -382,6 +460,7 @@ class RezonaPreferences(private val context: Context) {
             prefs[KEY_AUTH_GATE_SEEN] = true
             prefs[KEY_AUTH_PROVIDER] = "guest"
             prefs[KEY_GOOGLE_SIGNED_IN] = false
+            prefs.remove(KEY_FIREBASE_UID)
         }
     }
 
@@ -390,6 +469,7 @@ class RezonaPreferences(private val context: Context) {
             prefs[KEY_AUTH_GATE_SEEN] = false
             prefs[KEY_AUTH_PROVIDER] = "guest"
             prefs[KEY_GOOGLE_SIGNED_IN] = false
+            prefs.remove(KEY_FIREBASE_UID)
             prefs.remove(KEY_GOOGLE_EMAIL)
             prefs.remove(KEY_GOOGLE_DISPLAY_NAME)
         }
@@ -399,8 +479,24 @@ class RezonaPreferences(private val context: Context) {
         context.dataStore.edit { prefs ->
             prefs[KEY_AUTH_PROVIDER] = "guest"
             prefs[KEY_GOOGLE_SIGNED_IN] = false
+            prefs.remove(KEY_FIREBASE_UID)
             prefs.remove(KEY_GOOGLE_EMAIL)
             prefs.remove(KEY_GOOGLE_DISPLAY_NAME)
+        }
+    }
+
+    suspend fun resetSyncAndAccountLocalData() {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_AUTH_GATE_SEEN] = false
+            prefs[KEY_AUTH_PROVIDER] = "guest"
+            prefs[KEY_GOOGLE_SIGNED_IN] = false
+            prefs.remove(KEY_FIREBASE_UID)
+            prefs.remove(KEY_GOOGLE_EMAIL)
+            prefs.remove(KEY_GOOGLE_DISPLAY_NAME)
+            prefs.remove(KEY_LAST_SYNC_PUSH_MS)
+            prefs.remove(KEY_LAST_SYNC_PULL_MS)
+            prefs.remove(KEY_LAST_SYNC_ERROR)
+            prefs.remove(KEY_SETTINGS_UPDATED_AT)
         }
     }
 

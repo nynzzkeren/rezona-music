@@ -18,7 +18,27 @@ class NayamaApplication : Application(), ImageLoaderFactory {
         setupStrictMode()
         setupCrashLogging()
         createNotificationChannels()
+        initFirebaseAndSync()
         initNewPipe()
+    }
+
+    private fun initFirebaseAndSync() {
+        runCatching {
+            if (com.google.firebase.FirebaseApp.getApps(this).isNotEmpty()) {
+                val appCheck = com.google.firebase.appcheck.FirebaseAppCheck.getInstance()
+                appCheck.installAppCheckProviderFactory(
+                    com.google.firebase.appcheck.playintegrity.PlayIntegrityAppCheckProviderFactory.getInstance()
+                )
+            }
+        }.onFailure {
+            Log.w("NayamaApplication", "App Check init skipped: ${it.javaClass.simpleName}")
+        }
+        runCatching {
+            com.nayama.music.auth.FirebaseAuthManager.getInstance(this)
+            com.nayama.music.sync.RezonaCloudSyncManager.getInstance(this)
+        }.onFailure {
+            Log.w("NayamaApplication", "Firebase/Sync init skipped: ${it.javaClass.simpleName}")
+        }
     }
 
     private fun initNewPipe() {

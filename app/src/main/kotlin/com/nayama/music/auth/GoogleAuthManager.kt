@@ -1,75 +1,110 @@
 package com.nayama.music.auth
 
-import android.accounts.AccountManager
 import android.content.Context
 import android.content.Intent
-import android.os.Build
+import androidx.credentials.ClearCredentialStateRequest
+import androidx.credentials.CredentialManager
+import androidx.credentials.CustomCredential
+import androidx.credentials.GetCredentialRequest
+import androidx.credentials.exceptions.GetCredentialCancellationException
+import androidx.credentials.exceptions.NoCredentialException
+import com.google.android.libraries.identity.googleid.GetGoogleIdOption
+import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
+import com.google.firebase.auth.AuthCredential
+import com.google.firebase.auth.GoogleAuthProvider
+import kotlinx.coroutines.CancellationException
 
 /**
- * Native Android Google Account picker helper.
- * Uses AccountManager so sideloaded debug/release APKs work cleanly without requiring a registered
- * GCP OAuth Web Client SHA-1 (zero DEVELOPER_ERROR). Music playback stays anonymous/cookie-free.
+ * Sign in with Google helper using Jetpack Credential Manager (`androidx.credentials`)
+ * and `com.google.android.libraries.identity.googleid:googleid`.
+ * Never falls back to fake/local-only accounts.
  */
 object GoogleAuthManager {
 
-    data class PickedGoogleAccount(
-        val email: String,
-        val displayName: String
-    )
+    sealed class GoogleCredentialResult {
+        data class Success(
+            val idToken: String,
+            val authCredential: AuthCredential,
+            val email: String?,
+            val displayName: String?
+        ) : GoogleCredentialResult()
 
-    @Suppress("DEPRECATION")
-    fun createGoogleAccountChooserIntent(): Intent {
-        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-            AccountManager.newChooseAccountIntent(
-                /* selectedAccount = */ null,
-                /* allowableAccounts = */ null,
-                /* allowableAccountTypes = */ arrayOf("com.google"),
-                /* descriptionOverrideText = */ "Choose a Google account for Rezona",
-                /* addAccountAuthTokenType = */ null,
-                /* addAccountRequiredFeatures = */ null,
-                /* addAccountOptions = */ null
+        data object Cancelled : GoogleCredentialResult()
+        data class Error(val message: String) : GoogleCredentialResult()
+    }
+
+    fun resolveWebClientId(context: Context): String? {
+        val resId = context.resources.getIdentifier(
+            "default_web_client_id",
+            "string",
+            context.packageName
+        )
+        if (resId == 0) return null
+        val value = runCatching { context.getString(resId).trim() }.getOrNull().orEmpty()
+        return value.takeIf { it.isNotBlank() && it.contains(".apps.googleusercontent.com") }
+    }
+
+    suspend fun requestGoogleCredential(activityContext: Context): GoogleCredentialResult {
+        val webClientId = resolveWebClientId(activityContext)
+            ?: return GoogleCredentialResult.Error(
+                "Google Sign-In is not configured yet. Add google-services.json with OAuth Web Client ID and register SHA-1/SHA-256 in Firebase Console."
             )
-        } else {
-            AccountManager.newChooseAccountIntent(
-                null,
-                null,
-                arrayOf("com.google"),
-                false,
-                null,
-                null,
-                null,
-                null
+
+        return try {
+            val credentialManager = CredentialManager.create(activityContext)
+            val googleIdOption = GetGoogleIdOption.Builder()
+                .setFilterByAuthorizedAccounts(false)
+                .setServerClientId(webClientId)
+                .setAutoSelectEnabled(false)
+                .build()
+
+            val request = GetCredentialRequest.Builder()
+                .addCredentialOption(googleIdOption)
+                .build()
+
+            val result = credentialManager.getCredential(
+                context = activityContext,
+                request = request
+            )
+            val credential = result.credential
+            if (credential is CustomCredential &&
+                credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL
+            ) {
+                val parsed = GoogleIdTokenCredential.createFrom(credential.data)
+                val firebaseCred = GoogleAuthProvider.getCredential(parsed.idToken, null)
+                GoogleCredentialResult.Success(
+                    idToken = parsed.idToken,
+                    authCredential = firebaseCred,
+                    email = parsed.id,
+                    displayName = parsed.displayName
+                )
+            } else {
+                GoogleCredentialResult.Error("Unsupported credential returned by Google.")
+            }
+        } catch (e: CancellationException) {
+            throw e
+        } catch (_: GetCredentialCancellationException) {
+            GoogleCredentialResult.Cancelled
+        } catch (_: NoCredentialException) {
+            GoogleCredentialResult.Error(
+                "No Google account available via Credential Manager. Verify a Google account is signed in on this device and SHA-1/SHA-256 match Firebase Console."
+            )
+        } catch (e: Throwable) {
+            GoogleCredentialResult.Error(
+                e.localizedMessage ?: "Google Sign-In failed. Check Play Services and Firebase configuration."
             )
         }
     }
 
-    fun getDeviceGoogleAccounts(context: Context): List<PickedGoogleAccount> {
-        return runCatching {
-            val manager = AccountManager.get(context)
-            manager.getAccountsByType("com.google").mapNotNull { account ->
-                val email = account.name.trim()
-                if (email.isBlank()) null
-                else PickedGoogleAccount(
-                    email = email,
-                    displayName = deriveDisplayNameFromEmail(email)
-                )
-            }
-        }.getOrDefault(emptyList())
-    }
-
-    fun parseResult(data: Intent?): PickedGoogleAccount? {
-        val email = data?.getStringExtra(AccountManager.KEY_ACCOUNT_NAME)?.trim()
-            ?.takeIf { it.isNotBlank() }
-            ?: return null
-        return PickedGoogleAccount(
-            email = email,
-            displayName = deriveDisplayNameFromEmail(email)
-        )
+    suspend fun clearCredentialSession(context: Context) {
+        runCatching {
+            CredentialManager.create(context).clearCredentialState(ClearCredentialStateRequest())
+        }
     }
 
     fun deriveDisplayNameFromEmail(email: String): String {
         val local = email.substringBefore("@").trim()
-        if (local.isBlank()) return "Google User"
+        if (local.isBlank()) return "Rezona Listener"
         return local
             .split('.', '_', '-', '+')
             .filter { it.isNotBlank() }

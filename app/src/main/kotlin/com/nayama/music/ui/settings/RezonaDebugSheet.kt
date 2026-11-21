@@ -52,7 +52,8 @@ import com.nayama.music.ui.theme.Typography
 @Composable
 fun RezonaDebugScreen(
     onBack: () -> Unit,
-    onOpenGlassGallery: () -> Unit = {}
+    onOpenGlassGallery: () -> Unit = {},
+    onOpenSyncStatus: () -> Unit = {}
 ) {
     val logs by BackendDebugTracker.logs.collectAsState()
     val endpointsMap by BackendDebugTracker.endpoints.collectAsState()
@@ -224,14 +225,22 @@ fun RezonaDebugScreen(
                 }
             }
 
-            // ── 3. LIQUID GLASS GALLERY SHORTCUT ─────────────────────────────
+            // ── 3. CLOUD SYNC STATUS & LIQUID GLASS GALLERY SHORTCUT ─────────
             item {
-                RezonaGlassButton(
-                    text = "Open Liquid Glass Gallery",
-                    isPrimary = false,
-                    onClick = onOpenGlassGallery,
-                    modifier = Modifier.fillMaxWidth()
-                )
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    RezonaGlassButton(
+                        text = "Cloud Sync Status",
+                        isPrimary = true,
+                        onClick = onOpenSyncStatus,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    RezonaGlassButton(
+                        text = "Open Liquid Glass Gallery",
+                        isPrimary = false,
+                        onClick = onOpenGlassGallery,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
             }
 
             // ── 4. STREAM RESOLUTION LOGS ────────────────────────────────────

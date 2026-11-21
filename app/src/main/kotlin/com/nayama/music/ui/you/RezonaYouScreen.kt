@@ -1,11 +1,6 @@
 package com.nayama.music.ui.you
 
-import android.app.Activity
-import android.content.Intent
-import android.provider.Settings
 import android.widget.Toast
-import androidx.activity.compose.rememberLauncherForActivityResult
-import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -21,6 +16,7 @@ import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
@@ -54,16 +50,19 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nayama.music.R
-import com.nayama.music.auth.GoogleAuthManager
+import com.nayama.music.auth.FirebaseAuthActionResult
+import com.nayama.music.auth.FirebaseAuthManager
 import com.nayama.music.data.local.RezonaDatabase
 import com.nayama.music.data.preferences.RezonaPreferences
 import com.nayama.music.data.repository.RezonaLibraryRepository
 import com.nayama.music.data.repository.toRezonaTrack
 import com.nayama.music.navigation.RezonaFeatureFlags
 import com.nayama.music.playback.RezonaPlayerController
+import com.nayama.music.sync.RezonaCloudSyncManager
 import com.nayama.music.ui.components.LocalRezonaHazeState
 import com.nayama.music.ui.components.RezonaAsyncCoverArt
 import com.nayama.music.ui.components.RezonaEqualizerModalSheet
+import com.nayama.music.ui.components.RezonaGlassButton
 import com.nayama.music.ui.components.RezonaGlassCard
 import com.nayama.music.ui.components.RezonaGlassDialog
 import com.nayama.music.ui.components.RezonaGlassPill
@@ -102,6 +101,8 @@ fun RezonaYouScreen(
     val db = remember { RezonaDatabase.getInstance(context) }
     val repository = remember { RezonaLibraryRepository.getInstance(context) }
     val preferences = remember { RezonaPreferences(context) }
+    val authManager = remember { FirebaseAuthManager.getInstance(context) }
+    val syncManager = remember { RezonaCloudSyncManager.getInstance(context) }
     val scope = rememberCoroutineScope()
     val hazeState = LocalRezonaHazeState.current
     val scrollConnection = rememberAutoFoldNestedScrollConnection(onFoldChanged)
@@ -110,36 +111,19 @@ fun RezonaYouScreen(
     val mostPlayedEntities by repository.getMostPlayed(10).collectAsState(initial = emptyList())
     val historyEntries by db.historyDao().getRecentEntries(300).collectAsState(initial = emptyList())
     val likedCount by repository.getLikedCount().collectAsState(initial = 0)
-    val googleAccount by preferences.googleAccountFlow.collectAsState(
-        initial = RezonaPreferences.GoogleAccountState()
-    )
+    val authSession by authManager.session.collectAsState()
+    val syncStatus by syncManager.status.collectAsState()
 
     var showHistorySheet by remember { mutableStateOf(false) }
     var showRecapSheet by remember { mutableStateOf(false) }
     var showListenTogetherStub by remember { mutableStateOf(false) }
     var showEqualizerSheet by remember { mutableStateOf(false) }
     var showBackupSheet by remember { mutableStateOf(false) }
-    var showGoogleFallbackDialog by remember { mutableStateOf(false) }
-    var manualGoogleEmail by remember { mutableStateOf("") }
-    var manualGoogleName by remember { mutableStateOf("") }
-
-    val googlePickerLauncher = rememberLauncherForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        if (result.resultCode == Activity.RESULT_OK) {
-            val picked = GoogleAuthManager.parseResult(result.data)
-            if (picked != null) {
-                scope.launch {
-                    preferences.setGoogleAccount(picked.email, picked.displayName)
-                }
-                Toast.makeText(context, "Signed in as ${picked.email}", Toast.LENGTH_SHORT).show()
-            } else {
-                showGoogleFallbackDialog = true
-            }
-        } else if (GoogleAuthManager.getDeviceGoogleAccounts(context).isEmpty()) {
-            showGoogleFallbackDialog = true
-        }
-    }
+    var showSignOutDialog by remember { mutableStateOf(false) }
+    var showDeleteAccountDialog by remember { mutableStateOf(false) }
+    var deletePassword by remember { mutableStateOf("") }
+    var deleteError by remember { mutableStateOf<String?>(null) }
+    var isAccountBusy by remember { mutableStateOf(false) }
 
     val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
     val bottomPad = if (controller.currentTrack.value != null) 168.dp else 108.dp
@@ -161,8 +145,9 @@ fun RezonaYouScreen(
                 )
             }
 
-            // Account Card (Guest by default or native Android Google Account chooser profile)
+            // Account Card (Firebase Authenticated User or Local Guest Mode)
             item(key = "you_guest_card") {
+                val signedIn = authSession.isSignedIn && authSession.isEmailVerified
                 RezonaGlassCard(
                     modifier = Modifier.fillMaxWidth(),
                     shape = RoundedCornerShape(22.dp)
@@ -181,12 +166,14 @@ fun RezonaYouScreen(
                                 modifier = Modifier
                                     .size(54.dp)
                                     .clip(CircleShape)
-                                    .background(if (googleAccount.isSignedIn) Color(0x2EFFFFFF) else Color(0x1CFFFFFF))
+                                    .background(if (signedIn) Color(0x2EFFFFFF) else Color(0x1CFFFFFF))
                                     .border(1.dp, SpecularCardBorder, CircleShape),
                                 contentAlignment = Alignment.Center
                             ) {
-                                if (googleAccount.isSignedIn) {
-                                    val initial = googleAccount.displayName.firstOrNull()?.uppercaseChar()?.toString() ?: "G"
+                                if (signedIn) {
+                                    val initial = authSession.displayName.firstOrNull()?.uppercaseChar()?.toString()
+                                        ?: authSession.email.firstOrNull()?.uppercaseChar()?.toString()
+                                        ?: "R"
                                     Text(
                                         text = initial,
                                         style = Typography.titleLarge.copy(fontSize = 22.sp, fontWeight = FontWeight.Bold),
@@ -203,17 +190,17 @@ fun RezonaYouScreen(
                             Spacer(modifier = Modifier.width(14.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = if (googleAccount.isSignedIn) googleAccount.displayName else "Guest Listener",
+                                    text = if (signedIn) authSession.displayName else "Guest Listener",
                                     style = Typography.titleLarge.copy(fontWeight = FontWeight.Bold),
                                     color = PureWhite,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
                                 Text(
-                                    text = if (googleAccount.isSignedIn) {
-                                        "${googleAccount.email} · $likedCount liked"
+                                    text = if (signedIn) {
+                                        "${authSession.email} · ${authSession.providerLabel}"
                                     } else {
-                                        "On-device library · $likedCount liked · No account needed"
+                                        "Local-only library · $likedCount liked · Cloud sync off"
                                     },
                                     style = Typography.bodySmall,
                                     color = SmokySilver,
@@ -225,72 +212,114 @@ fun RezonaYouScreen(
 
                         RezonaHairlineDivider()
 
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.SpaceBetween,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            if (googleAccount.isSignedIn) {
-                                Text(
-                                    text = if (googleAccount.provider == "email") {
-                                        "Email account signed in on device"
-                                    } else {
-                                        "Google profile linked on device"
-                                    },
-                                    style = Typography.bodySmall,
-                                    color = SoftSilver,
-                                    modifier = Modifier.weight(1f)
-                                )
-                                Spacer(modifier = Modifier.width(10.dp))
+                        if (signedIn) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = if (syncStatus.pendingOpsCount > 0) {
+                                            "Pending upload: ${syncStatus.pendingOpsCount} ops"
+                                        } else {
+                                            "$likedCount liked · Cloud synced"
+                                        },
+                                        style = Typography.bodySmall,
+                                        color = SoftSilver
+                                    )
+                                    Text(
+                                        text = "UID: ${authSession.uid?.take(10).orEmpty()}...",
+                                        style = Typography.labelSmall,
+                                        color = SmokySilver
+                                    )
+                                }
                                 RezonaGlassPill(
                                     isActive = false,
-                                    onClick = {
-                                        scope.launch { preferences.clearGoogleAccount() }
-                                        Toast.makeText(context, "Signed out", Toast.LENGTH_SHORT).show()
-                                    }
+                                    onClick = { onOpenSettingsSection("Sync") },
+                                    modifier = Modifier.heightIn(min = 48.dp)
                                 ) {
                                     Text(
-                                        text = "Sign out",
+                                        text = "Sync status",
                                         style = Typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
                                         color = PearlWhite
                                     )
                                 }
-                            } else {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                            }
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                            ) {
+                                RezonaGlassButton(
+                                    text = "Sign out",
+                                    isPrimary = false,
+                                    onClick = { showSignOutDialog = true },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .heightIn(min = 48.dp)
+                                )
+                                RezonaGlassButton(
+                                    text = "Delete account",
+                                    isPrimary = false,
+                                    onClick = {
+                                        deletePassword = ""
+                                        deleteError = null
+                                        showDeleteAccountDialog = true
+                                    },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .heightIn(min = 48.dp)
+                                )
+                            }
+                        } else {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                RezonaGlassPill(
+                                    isActive = false,
+                                    onClick = onOpenAuth,
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .heightIn(min = 48.dp)
                                 ) {
-                                    RezonaGlassPill(
-                                        isActive = false,
-                                        onClick = onOpenAuth,
-                                        modifier = Modifier.weight(1f)
-                                    ) {
-                                        Text(
-                                            text = "Email Sign in / up",
-                                            style = Typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                                            color = PearlWhite,
-                                            maxLines = 1
-                                        )
-                                    }
-                                    RezonaGlassPill(
-                                        isActive = true,
-                                        onClick = {
-                                            val launched = runCatching {
-                                                googlePickerLauncher.launch(GoogleAuthManager.createGoogleAccountChooserIntent())
-                                                true
-                                            }.getOrDefault(false)
-                                            if (!launched) {
-                                                showGoogleFallbackDialog = true
+                                    Text(
+                                        text = "Sign in / Create Account",
+                                        style = Typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
+                                        color = PearlWhite,
+                                        maxLines = 1
+                                    )
+                                }
+                                RezonaGlassPill(
+                                    isActive = true,
+                                    onClick = {
+                                        if (isAccountBusy) return@RezonaGlassPill
+                                        scope.launch {
+                                            isAccountBusy = true
+                                            when (val res = authManager.signInWithGoogle(context)) {
+                                                is FirebaseAuthActionResult.SignedIn -> {
+                                                    Toast.makeText(context, "Signed in as ${res.email}", Toast.LENGTH_SHORT).show()
+                                                }
+                                                is FirebaseAuthActionResult.AccountCollision -> {
+                                                    onOpenAuth()
+                                                }
+                                                is FirebaseAuthActionResult.Error -> {
+                                                    Toast.makeText(context, res.message, Toast.LENGTH_LONG).show()
+                                                }
+                                                else -> Unit
                                             }
+                                            isAccountBusy = false
                                         }
-                                    ) {
-                                        Text(
-                                            text = "G  Google",
-                                            style = Typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                                            color = PureWhite
-                                        )
-                                    }
+                                    },
+                                    modifier = Modifier.heightIn(min = 48.dp)
+                                ) {
+                                    Text(
+                                        text = if (isAccountBusy) "..." else "G  Google",
+                                        style = Typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = PureWhite
+                                    )
                                 }
                             }
                         }
@@ -368,6 +397,10 @@ fun RezonaYouScreen(
                     showBackupSheet = true
                 }
                 RezonaHairlineDivider(startIndent = 38.dp)
+                YouPlainRow(R.drawable.ic_cloud_done, "Cloud sync & status", "UID, queued ops, push/pull & force restore") {
+                    onOpenSettingsSection("Sync")
+                }
+                RezonaHairlineDivider(startIndent = 38.dp)
                 YouPlainRow(R.drawable.ic_info, "About", "Diagnostics, Glass Gallery & Open-source licenses") {
                     onOpenSettingsSection("About")
                 }
@@ -388,93 +421,131 @@ fun RezonaYouScreen(
         )
     }
 
-    if (showGoogleFallbackDialog) {
-        val deviceAccounts = remember(showGoogleFallbackDialog) {
-            GoogleAuthManager.getDeviceGoogleAccounts(context)
-        }
+    if (showSignOutDialog) {
         RezonaGlassDialog(
-            title = "Sign in with Google",
-            onDismissRequest = { showGoogleFallbackDialog = false },
-            confirmText = "Save Profile",
+            title = "Sign Out",
+            onDismissRequest = { showSignOutDialog = false },
+            dismissText = null,
+            onConfirm = null
+        ) {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    text = "Keep local library on this device or clear local data? Your cloud data will remain safely stored.",
+                    style = Typography.bodyMedium,
+                    color = SoftSilver
+                )
+                RezonaGlassButton(
+                    text = "Keep Local Data",
+                    isPrimary = true,
+                    onClick = {
+                        scope.launch {
+                            syncManager.detachListeners()
+                            authManager.signOut()
+                            showSignOutDialog = false
+                            Toast.makeText(context, "Signed out (local library kept)", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                )
+                RezonaGlassButton(
+                    text = "Clear Local Data",
+                    isPrimary = false,
+                    onClick = {
+                        scope.launch {
+                            syncManager.detachListeners()
+                            syncManager.clearLocalUserLibraryTables()
+                            authManager.signOut()
+                            showSignOutDialog = false
+                            Toast.makeText(context, "Signed out and local data cleared", Toast.LENGTH_SHORT).show()
+                        }
+                    },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                )
+                RezonaGlassButton(
+                    text = "Cancel",
+                    isPrimary = false,
+                    onClick = { showSignOutDialog = false },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .heightIn(min = 48.dp)
+                )
+            }
+        }
+    }
+
+    if (showDeleteAccountDialog) {
+        RezonaGlassDialog(
+            title = "Delete Account Permanently",
+            onDismissRequest = {
+                if (!isAccountBusy) showDeleteAccountDialog = false
+            },
+            confirmText = if (isAccountBusy) "Deleting..." else if (authSession.isPasswordUser) "Verify & Delete" else "Re-authenticate with Google",
             onConfirm = {
-                val trimmed = manualGoogleEmail.trim()
-                if (trimmed.contains("@") && trimmed.contains(".")) {
-                    scope.launch {
-                        preferences.setGoogleAccount(trimmed, manualGoogleName.trim())
+                if (isAccountBusy) return@RezonaGlassDialog
+                val uid = authSession.uid ?: return@RezonaGlassDialog
+                scope.launch {
+                    isAccountBusy = true
+                    deleteError = null
+                    val reauth = if (authSession.isPasswordUser) {
+                        if (deletePassword.isEmpty()) {
+                            Result.failure(IllegalStateException("Enter your password to confirm."))
+                        } else {
+                            authManager.reauthenticateWithPassword(deletePassword)
+                        }
+                    } else {
+                        authManager.reauthenticateWithGoogle(context)
                     }
-                    manualGoogleEmail = ""
-                    manualGoogleName = ""
-                    showGoogleFallbackDialog = false
-                    Toast.makeText(context, "Signed in as $trimmed", Toast.LENGTH_SHORT).show()
-                } else {
-                    Toast.makeText(context, "Enter a valid Google email", Toast.LENGTH_SHORT).show()
+                    if (reauth.isFailure) {
+                        deleteError = reauth.exceptionOrNull()?.message ?: "Re-authentication failed."
+                        isAccountBusy = false
+                        return@launch
+                    }
+
+                    syncManager.detachListeners()
+                    val wipeRes = syncManager.deleteAllCloudDataForUid(uid)
+                    if (wipeRes.isFailure) {
+                        deleteError = wipeRes.exceptionOrNull()?.message ?: "Failed to delete cloud data."
+                        isAccountBusy = false
+                        return@launch
+                    }
+
+                    val delUser = authManager.deleteAuthenticatedFirebaseUser()
+                    if (delUser.isFailure) {
+                        deleteError = delUser.exceptionOrNull()?.message ?: "Failed to delete account."
+                        isAccountBusy = false
+                        return@launch
+                    }
+
+                    syncManager.clearLocalUserLibraryTables()
+                    preferences.resetSyncAndAccountLocalData()
+                    showDeleteAccountDialog = false
+                    isAccountBusy = false
+                    Toast.makeText(context, "Account and cloud library deleted", Toast.LENGTH_SHORT).show()
                 }
             },
             dismissText = "Cancel"
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                if (deviceAccounts.isNotEmpty()) {
-                    Text(
-                        text = "Detected Google accounts on device:",
-                        style = Typography.labelMedium,
-                        color = SoftSilver
+                Text(
+                    text = "This permanently deletes your Firebase Auth user, all cloud synced likes, playlists, library items, history, pins, and settings, and wipes local library data on this device.",
+                    style = Typography.bodySmall,
+                    color = SoftSilver
+                )
+                if (authSession.isPasswordUser) {
+                    RezonaGlassTextField(
+                        value = deletePassword,
+                        onValueChange = { deletePassword = it; deleteError = null },
+                        placeholder = "Current password to confirm",
+                        modifier = Modifier.heightIn(min = 48.dp)
                     )
-                    deviceAccounts.forEach { acc ->
-                        RezonaGlassPill(
-                            isActive = false,
-                            onClick = {
-                                scope.launch {
-                                    preferences.setGoogleAccount(acc.email, acc.displayName)
-                                }
-                                showGoogleFallbackDialog = false
-                                Toast.makeText(context, "Signed in as ${acc.email}", Toast.LENGTH_SHORT).show()
-                            }
-                        ) {
-                            Text(
-                                text = acc.email,
-                                style = Typography.bodySmall,
-                                color = PureWhite,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                    }
-                    RezonaHairlineDivider()
-                } else {
-                    Text(
-                        text = "No device Google account was returned. Add one in Android Settings or enter your Google email for local profile display.",
-                        style = Typography.bodySmall,
-                        color = SoftSilver
-                    )
-                    RezonaGlassPill(
-                        isActive = false,
-                        onClick = {
-                            runCatching {
-                                context.startActivity(
-                                    Intent(Settings.ACTION_ADD_ACCOUNT).apply {
-                                        putExtra(Settings.EXTRA_ACCOUNT_TYPES, arrayOf("com.google"))
-                                    }
-                                )
-                            }
-                        }
-                    ) {
-                        Text(
-                            text = "Open Android Add Account",
-                            style = Typography.labelMedium,
-                            color = PearlWhite
-                        )
-                    }
                 }
-                RezonaGlassTextField(
-                    value = manualGoogleEmail,
-                    onValueChange = { manualGoogleEmail = it },
-                    placeholder = "yourname@gmail.com"
-                )
-                RezonaGlassTextField(
-                    value = manualGoogleName,
-                    onValueChange = { manualGoogleName = it },
-                    placeholder = "Display name (optional)"
-                )
+                if (!deleteError.isNullOrBlank()) {
+                    Text(deleteError!!, style = Typography.bodySmall, color = Color(0xFFFF8E96))
+                }
             }
         }
     }

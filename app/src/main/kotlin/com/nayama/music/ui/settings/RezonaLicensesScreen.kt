@@ -106,6 +106,55 @@ val REZONA_LICENSES = listOf(
         license = "ITF Free Font License",
         description = "Geometric modernist typography driving Rezona's visual system.",
         notice = "Satoshi typeface designed by Indian Type Foundry. Free for personal and commercial use."
+    ),
+    OpenSourceLibrary(
+        name = "Inter",
+        author = "Rasmus Andersson",
+        license = "SIL Open Font License 1.1 (OFL-1.1)",
+        description = "Variable neo-grotesk typeface bundled for Lyrics Style.",
+        notice = "Copyright 2020 The Inter Project Authors. Licensed under the SIL Open Font License, Version 1.1."
+    ),
+    OpenSourceLibrary(
+        name = "Space Grotesk",
+        author = "Florian Karsten",
+        license = "SIL Open Font License 1.1 (OFL-1.1)",
+        description = "Proportional sans-serif editorial typeface bundled for Lyrics Style.",
+        notice = "Copyright 2020 The Space Grotesk Project Authors. Licensed under the SIL Open Font License, Version 1.1."
+    ),
+    OpenSourceLibrary(
+        name = "Playfair Display",
+        author = "Claus Eggers Sørensen",
+        license = "SIL Open Font License 1.1 (OFL-1.1)",
+        description = "High-contrast transitional serif typeface bundled for Lyrics Style.",
+        notice = "Copyright 2017 The Playfair Display Project Authors. Licensed under the SIL Open Font License, Version 1.1."
+    ),
+    OpenSourceLibrary(
+        name = "JetBrains Mono",
+        author = "JetBrains s.r.o.",
+        license = "SIL Open Font License 1.1 (OFL-1.1)",
+        description = "Monospace typeface with increased x-height bundled for Lyrics Style.",
+        notice = "Copyright 2020 JetBrains s.r.o. Licensed under the SIL Open Font License, Version 1.1."
+    ),
+    OpenSourceLibrary(
+        name = "Nunito",
+        author = "Vernon Adams, Cyreal & Jacques Le Bailly",
+        license = "SIL Open Font License 1.1 (OFL-1.1)",
+        description = "Well-balanced rounded sans-serif typeface bundled for Lyrics Style.",
+        notice = "Copyright 2014 The Nunito Project Authors. Licensed under the SIL Open Font License, Version 1.1."
+    ),
+    OpenSourceLibrary(
+        name = "Caveat",
+        author = "Pablo Impallari",
+        license = "SIL Open Font License 1.1 (OFL-1.1)",
+        description = "Expressive handwriting typeface bundled for Lyrics Style.",
+        notice = "Copyright 2015 The Caveat Project Authors. Licensed under the SIL Open Font License, Version 1.1."
+    ),
+    OpenSourceLibrary(
+        name = "Bebas Neue",
+        author = "Ryoichi Tsunekawa (Dharma Type)",
+        license = "SIL Open Font License 1.1 (OFL-1.1)",
+        description = "Condensed all-caps display typeface bundled for Lyrics Style.",
+        notice = "Copyright 2018 The Bebas Neue Project Authors. Licensed under the SIL Open Font License, Version 1.1."
     )
 )
 

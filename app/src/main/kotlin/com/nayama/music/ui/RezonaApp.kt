@@ -4,13 +4,22 @@ import android.app.ActivityManager
 import android.content.Context
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.CircularProgressIndicator
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -18,21 +27,32 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
+import com.nayama.music.auth.FirebaseAuthManager
 import com.nayama.music.data.preferences.RezonaPreferences
 import com.nayama.music.navigation.RezonaTab
 import com.nayama.music.playback.RezonaPlayerController
+import com.nayama.music.sync.RezonaCloudSyncManager
 import com.nayama.music.ui.auth.RezonaAuthScreen
 import com.nayama.music.ui.components.GlassIntensity
 import com.nayama.music.ui.components.LocalAmbientAccentColor
+import com.nayama.music.ui.components.LocalAmbientBaseColor
 import com.nayama.music.ui.components.LocalRezonaHazeState
+import com.nayama.music.ui.components.LocalTintedGlassColor
+import com.nayama.music.ui.theme.ArtworkColorExtractor
+import com.nayama.music.ui.theme.rememberAnimatedArtworkPalette
 import com.nayama.music.ui.components.RezonaBottomBar
 import com.nayama.music.ui.components.RezonaContinuousAmbientLayer
+import com.nayama.music.ui.components.RezonaGlassButton
+import com.nayama.music.ui.components.RezonaGlassCard
+import com.nayama.music.ui.components.RezonaGlassDialog
 import com.nayama.music.ui.components.RezonaMiniPlayer
 import com.nayama.music.ui.components.RezonaNavigationRail
 import com.nayama.music.ui.components.deriveAmbientColors
@@ -42,8 +62,13 @@ import com.nayama.music.ui.player.RezonaExpandedPlayer
 import com.nayama.music.ui.search.RezonaSearchScreen
 import com.nayama.music.ui.settings.RezonaSettingsScreen
 import com.nayama.music.ui.studio.RezonaStudioScreen
+import com.nayama.music.ui.theme.PearlWhite
+import com.nayama.music.ui.theme.PureWhite
+import com.nayama.music.ui.theme.SoftSilver
+import com.nayama.music.ui.theme.Typography
 import com.nayama.music.ui.you.RezonaYouScreen
 import dev.chrisbanes.haze.HazeState
+import kotlinx.coroutines.launch
 
 private fun isLowEndDevice(context: Context): Boolean {
     val activityManager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
@@ -63,8 +88,14 @@ private fun isLowEndDevice(context: Context): Boolean {
 fun RezonaApp() {
     val context = LocalContext.current
     val preferences = remember { RezonaPreferences(context) }
+    val authManager = remember { FirebaseAuthManager.getInstance(context) }
+    val syncManager = remember { RezonaCloudSyncManager.getInstance(context) }
+    val scope = rememberCoroutineScope()
+
     val dockFoldEnabled by preferences.dockFoldOnScrollFlow.collectAsState(initial = true)
     val authGateSeen by preferences.authGateSeenFlow.collectAsState(initial = null as Boolean?)
+    val authSession by authManager.session.collectAsState()
+    val syncStatus by syncManager.status.collectAsState()
     var showManualAuthOverlay by remember { mutableStateOf(false) }
 
     if (authGateSeen == null) {
@@ -72,7 +103,11 @@ fun RezonaApp() {
         return
     }
 
-    if (authGateSeen == false || showManualAuthOverlay) {
+    val mustShowAuthScreen = authGateSeen == false ||
+        showManualAuthOverlay ||
+        authSession.needsEmailVerification
+
+    if (mustShowAuthScreen) {
         RezonaAuthScreen(
             onAuthenticated = { showManualAuthOverlay = false }
         )
@@ -100,11 +135,17 @@ fun RezonaApp() {
         }
     }
 
-    val (ambientPrimary, ambientSecondary, ambientTertiary) = remember(currentTrack?.id, currentTrack?.title, currentTrack?.artist) {
-        if (currentTrack != null) {
-            deriveAmbientColors(currentTrack)
-        } else {
-            Triple(Color(0xFF151822), Color(0xFF0C0E14), Color(0xFF06070A))
+    val artworkPalette = rememberAnimatedArtworkPalette(
+        context = context,
+        artworkUrl = currentTrack?.coverArtUrl,
+        fallbackKey = currentTrack?.id
+    )
+
+    // Precompute palette for upcoming queued tracks asynchronously before track change to prevent flashes
+    LaunchedEffect(playerController.queue.size, currentTrack?.id) {
+        val nextTracks = playerController.queue.take(3)
+        nextTracks.forEach { upcoming ->
+            ArtworkColorExtractor.prefetch(context, upcoming.coverArtUrl)
         }
     }
 
@@ -112,14 +153,17 @@ fun RezonaApp() {
 
     CompositionLocalProvider(
         LocalRezonaHazeState provides hazeState,
-        LocalAmbientAccentColor provides ambientPrimary
+        LocalAmbientAccentColor provides artworkPalette.primaryAmbient,
+        LocalAmbientBaseColor provides artworkPalette.ambientBase,
+        LocalTintedGlassColor provides artworkPalette.glassTint
     ) {
         Box(modifier = Modifier.fillMaxSize()) {
-            // 1. Root Continuous Ambient Layer (Edge-to-Edge, Zero Seams)
+            // 1. Root Continuous Ambient Layer (Edge-to-Edge, Cover Color Family, Zero Seams)
             RezonaContinuousAmbientLayer(
-                primaryColor = ambientPrimary,
-                secondaryColor = ambientSecondary,
-                tertiaryColor = ambientTertiary,
+                primaryColor = artworkPalette.primaryAmbient,
+                secondaryColor = artworkPalette.secondaryAmbient,
+                tertiaryColor = artworkPalette.tertiaryAmbient,
+                ambientBase = artworkPalette.ambientBase,
                 modifier = Modifier.fillMaxSize()
             )
 
@@ -251,6 +295,84 @@ fun RezonaApp() {
                     initialSection = settingsSection,
                     onDismiss = { isSettingsVisible = false }
                 )
+            }
+
+            // 6. Initial Cloud Restore Progress Overlay
+            if (syncStatus.isRestoring && !syncStatus.showGuestUploadPrompt) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(Color(0xCC05070B)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    RezonaGlassCard(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 32.dp),
+                        shape = RoundedCornerShape(24.dp)
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally,
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            CircularProgressIndicator(color = PureWhite, strokeWidth = 2.5.dp)
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Restoring your library...",
+                                style = Typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                                color = PureWhite
+                            )
+                            Text(
+                                text = "Fetching your likes, playlists & settings from cloud.",
+                                style = Typography.bodySmall,
+                                color = SoftSilver
+                            )
+                        }
+                    }
+                }
+            }
+
+            // 7. First Sign-In Guest Library Upload & Merge Prompt
+            if (syncStatus.showGuestUploadPrompt) {
+                RezonaGlassDialog(
+                    title = "Upload Guest Library?",
+                    onDismissRequest = {
+                        scope.launch { syncManager.respondToGuestUploadPrompt(uploadAndMerge = false) }
+                    },
+                    dismissText = null,
+                    onConfirm = null
+                ) {
+                    Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                        Text(
+                            text = "Upload your guest library to your account? Local likes, playlists, and pins will merge without duplicates.",
+                            style = Typography.bodyMedium,
+                            color = PearlWhite
+                        )
+                        RezonaGlassButton(
+                            text = "Upload & Merge",
+                            isPrimary = true,
+                            onClick = {
+                                scope.launch { syncManager.respondToGuestUploadPrompt(uploadAndMerge = true) }
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 48.dp)
+                        )
+                        RezonaGlassButton(
+                            text = "Keep Cloud Only",
+                            isPrimary = false,
+                            onClick = {
+                                scope.launch { syncManager.respondToGuestUploadPrompt(uploadAndMerge = false) }
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .heightIn(min = 48.dp)
+                        )
+                    }
+                }
             }
         }
     }

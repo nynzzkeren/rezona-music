@@ -82,14 +82,26 @@ fun RezonaSettingsScreen(
     val romanizationEnabled by preferences.lyricsRomanizationEnabledFlow.collectAsState(initial = false)
     val blurUnfocused by preferences.lyricsBlurUnfocusedFlow.collectAsState(initial = true)
     val pauseHistory by preferences.pauseHistoryFlow.collectAsState(initial = false)
+    val videoQuality by preferences.videoQualityFlow.collectAsState(initial = "480p")
+    val videoHqWifiOnly by preferences.videoHqWifiOnlyFlow.collectAsState(initial = true)
+    val lyricsStyle by preferences.lyricsStyleFlow.collectAsState(initial = com.nayama.music.ui.lyrics.LyricsStyleConfig())
 
     var showLicenses by remember { mutableStateOf(false) }
     var showDebugScreen by remember { mutableStateOf(false) }
     var showGlassGallery by remember { mutableStateOf(false) }
+    var showLyricsStyleSheet by remember { mutableStateOf(false) }
+    var showSyncStatus by remember(initialSection) { mutableStateOf(initialSection == "Sync") }
 
     val offlineBytes = remember(downloadMgr) { downloadMgr.totalStorageBytes() }
     val offlineMb = String.format(Locale.ENGLISH, "%.1f MB", offlineBytes / (1024f * 1024f))
 
+    if (showSyncStatus) {
+        RezonaSyncStatusScreen(onBack = {
+            showSyncStatus = false
+            if (initialSection == "Sync") onDismiss()
+        })
+        return
+    }
     if (showLicenses) {
         RezonaLicensesScreen(onBack = { showLicenses = false })
         return
@@ -100,6 +112,10 @@ fun RezonaSettingsScreen(
             onOpenGlassGallery = {
                 showDebugScreen = false
                 showGlassGallery = true
+            },
+            onOpenSyncStatus = {
+                showDebugScreen = false
+                showSyncStatus = true
             }
         )
         return
@@ -191,6 +207,35 @@ fun RezonaSettingsScreen(
                         checked = gapless,
                         onCheckedChange = { coroutineScope.launch { preferences.setGaplessEnabled(it) } }
                     )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+                    Text("Music Video Quality", style = Typography.titleMedium, color = PearlWhite)
+                    Text("Default 480p for smooth playback when toggling Video mode", style = Typography.bodySmall, color = SmokySilver)
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        listOf("Auto", "360p", "480p", "720p", "1080p").forEach { vq ->
+                            val isSelected = videoQuality.equals(vq, ignoreCase = true)
+                            RezonaGlassPill(
+                                isActive = isSelected,
+                                onClick = { coroutineScope.launch { preferences.setVideoQuality(vq) } },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text(
+                                    text = vq,
+                                    fontSize = 11.sp,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                    color = if (isSelected) PureWhite else SoftSilver,
+                                    maxLines = 1
+                                )
+                            }
+                        }
+                    }
+                    SettingsToggleRow(
+                        title = "High quality on Wi-Fi only",
+                        subtitle = "Cap cellular music video at 480p to save mobile data",
+                        checked = videoHqWifiOnly,
+                        onCheckedChange = { coroutineScope.launch { preferences.setVideoHqWifiOnly(it) } }
+                    )
                     RezonaHairlineDivider()
                 }
             }
@@ -270,6 +315,13 @@ fun RezonaSettingsScreen(
                         checked = blurUnfocused,
                         onCheckedChange = { coroutineScope.launch { preferences.setLyricsBlurUnfocused(it) } }
                     )
+                    RezonaHairlineDivider()
+                    SettingsClickableRow(
+                        title = "Lyrics Style & Font",
+                        subtitle = "${lyricsStyle.fontFamily.displayName} · ${lyricsStyle.weight.label} · ${lyricsStyle.fontSizeSp.roundToInt()}sp"
+                    ) {
+                        showLyricsStyleSheet = true
+                    }
                     RezonaHairlineDivider()
                 }
             }
@@ -372,6 +424,10 @@ fun RezonaSettingsScreen(
             item(key = "sec_about") {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     SettingsSectionHeader("ABOUT")
+                    SettingsClickableRow("Cloud Sync Status", "Firebase UID, last push/pull, queued ops & restore") {
+                        showSyncStatus = true
+                    }
+                    RezonaHairlineDivider()
                     SettingsClickableRow("Open-source licenses", "NewPipeExtractor, InnerTune/Metrolist/SimpMusic (GPLv3), Haze, Media3") {
                         showLicenses = true
                     }
@@ -389,6 +445,15 @@ fun RezonaSettingsScreen(
                 }
             }
         }
+    }
+
+    if (showLyricsStyleSheet) {
+        com.nayama.music.ui.lyrics.RezonaLyricsStyleSheet(
+            style = lyricsStyle,
+            onStyleChange = { updated -> coroutineScope.launch { preferences.setLyricsStyle(updated) } },
+            onReset = { coroutineScope.launch { preferences.resetLyricsStyle() } },
+            onDismiss = { showLyricsStyleSheet = false }
+        )
     }
 }
 

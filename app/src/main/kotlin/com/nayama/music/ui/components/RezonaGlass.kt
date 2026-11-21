@@ -188,6 +188,7 @@ fun GlassSurface(
     val view = LocalView.current
     val hazeState = LocalRezonaHazeState.current
     val ambientAccent = LocalAmbientAccentColor.current
+    val tintedGlass = LocalTintedGlassColor.current
     val interactionSource = remember { MutableInteractionSource() }
     val isPressedRaw by interactionSource.collectIsPressedAsState()
     val isPressed = (isPressedRaw || forcePressedPreview) && enabled
@@ -206,23 +207,25 @@ fun GlassSurface(
         supportsHardwareBlur &&
         GlassIntensity.current != GlassIntensity.LOW
 
-    // Tint: vertical gradient white 8-14% at top to 2-5% at bottom + faint cover color influence
+    // Cover-tinted glass: ambientBase lightened 12-18% at 35-50% alpha + white specular rim (no black/purple boxes)
     val topAlpha = when {
-        isPressed -> 0.22f
-        isActive -> 0.18f
-        isFocused -> 0.16f
-        variant == GlassSurfaceVariant.Floating || variant == GlassSurfaceVariant.Dialog -> 0.14f
-        else -> 0.11f
+        isPressed -> 0.54f
+        isActive -> 0.48f
+        isFocused -> 0.46f
+        variant == GlassSurfaceVariant.Floating || variant == GlassSurfaceVariant.Dialog -> 0.48f
+        variant == GlassSurfaceVariant.IconButton -> 0.44f
+        else -> 0.38f
     }
     val bottomAlpha = when {
-        isPressed -> 0.09f
-        isActive -> 0.07f
-        variant == GlassSurfaceVariant.Floating || variant == GlassSurfaceVariant.Dialog -> 0.05f
-        else -> 0.03f
+        isPressed -> 0.42f
+        isActive -> 0.36f
+        variant == GlassSurfaceVariant.Floating || variant == GlassSurfaceVariant.Dialog -> 0.38f
+        variant == GlassSurfaceVariant.IconButton -> 0.32f
+        else -> 0.28f
     }
 
-    val tintedTop = lerp(Color.White, ambientAccent, 0.18f).copy(alpha = topAlpha)
-    val tintedBottom = lerp(Color(0xFF141822), ambientAccent, 0.22f).copy(alpha = bottomAlpha + 0.32f)
+    val tintedTop = lerp(tintedGlass, Color.White, 0.14f).copy(alpha = topAlpha)
+    val tintedBottom = lerp(tintedGlass, ambientAccent, 0.28f).copy(alpha = bottomAlpha)
 
     // Specular rim: 1dp gradient border, white 35-45% at top fading to 5% at bottom
     val rimTopAlpha = when {

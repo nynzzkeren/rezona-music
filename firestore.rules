@@ -1,0 +1,507 @@
+rules_version = '2';
+
+// ===============================================================
+// Assumed Data Model — Rezona Music Android App
+// ===============================================================
+//
+// All user cloud sync data is strictly isolated under /users/{uid}.
+// The /users/{uid} profile document itself is optional; subcollections
+// may exist independently so sync and offline-first writes never fail
+// if the profile document has not yet been written.
+//
+// Collection: users
+// Document ID: {uid} (must match request.auth.uid; optional profile doc)
+// Fields:
+//   - displayName: string (optional, 0..100 chars)
+//   - email: string (optional, 0..254 chars, empty or valid email)
+//   - provider: string (optional, 0..40 chars)
+//   - updatedAt: int (required, > 0)
+//
+// Collection: users/{uid}/likes
+// Document ID: {videoId}
+// Fields (keys <= 12, strict schema):
+//   - videoId: string (required, == document ID, 1..64 chars)
+//   - title: string (required, 1..300 chars)
+//   - artists: string (required, 0..300 chars)
+//   - album: string (required, 0..300 chars)
+//   - durationMs: int (required, 0..86400000)
+//   - thumbnailUrl: string (required, 0..1024 chars, empty or http/https URL)
+//   - addedAt: int (required, >= 0)
+//   - updatedAt: int (required, > 0)
+//   - deleted: bool (required)
+//
+// Collection: users/{uid}/playlists
+// Document ID: {playlistId}
+// Fields (keys <= 10, strict schema):
+//   - playlistId: string (required, == document ID, 1..64 chars)
+//   - name: string (required, 1..200 chars)
+//   - createdAt: int (required, >= 0, immutable on update)
+//   - updatedAt: int (required, > 0)
+//   - trackIds: list<string> (required, size <= 2000)
+//   - deleted: bool (required)
+//   - description: string (optional, 0..500 chars)
+//   - artworkUrl: string (optional, 0..1024 chars, empty or http/https URL)
+//
+// Collection: users/{uid}/playlists/{playlistId}/tracks
+// Document ID: {videoId}
+// Fields (keys <= 12, strict schema):
+//   - videoId: string (required, == document ID, 1..64 chars)
+//   - title: string (required, 1..300 chars)
+//   - artists: string (required, 0..300 chars)
+//   - album: string (required, 0..300 chars)
+//   - durationMs: int (required, 0..86400000)
+//   - thumbnailUrl: string (required, 0..1024 chars, empty or http/https URL)
+//   - addedAt: int (required, >= 0)
+//   - updatedAt: int (required, > 0)
+//   - deleted: bool (required)
+//   - orderIndex: int (optional, 0..5000)
+//
+// Collection: users/{uid}/libraryItems
+// Document ID: {itemId}
+// Fields (keys <= 10, strict schema):
+//   - itemId: string (required, == document ID, 1..128 chars)
+//   - itemType: string (required, in ['album', 'artist', 'playlist', 'song'])
+//   - title: string (required, 1..300 chars)
+//   - subtitle: string (required, 0..300 chars)
+//   - thumbnailUrl: string (required, 0..1024 chars, empty or http/https URL)
+//   - addedAt: int (required, >= 0)
+//   - updatedAt: int (required, > 0)
+//   - deleted: bool (required)
+//
+// Collection: users/{uid}/history
+// Document ID: {entryId}
+// Fields (keys <= 12, strict schema):
+//   - entryId: string (required, == document ID, 1..128 chars)
+//   - videoId: string (required, 1..64 chars)
+//   - title: string (required, 1..300 chars)
+//   - artists: string (required, 0..300 chars)
+//   - album: string (required, 0..300 chars)
+//   - durationMs: int (required, 0..86400000)
+//   - thumbnailUrl: string (required, 0..1024 chars, empty or http/https URL)
+//   - playedAt: int (required, >= 0)
+//   - updatedAt: int (required, > 0)
+//   - deleted: bool (required)
+//
+// Collection: users/{uid}/settings
+// Document ID: 'preferences' (for create/update; owner may delete any doc on wipe)
+// Fields (keys <= 40, strict allowed preference keys + bounded types/sizes):
+//   - updatedAt: int (required, > 0)
+//   - Rezona audio, UI, lyrics, privacy, and library preference keys (optional)
+//
+// Collection: users/{uid}/pins
+// Document ID: {videoId}
+// Fields (keys <= 12, strict schema):
+//   - videoId: string (required, == document ID, 1..64 chars)
+//   - title: string (required, 1..300 chars)
+//   - artists: string (required, 0..300 chars)
+//   - album: string (required, 0..300 chars)
+//   - durationMs: int (required, 0..86400000)
+//   - thumbnailUrl: string (required, 0..1024 chars, empty or http/https URL)
+//   - addedAt: int (required, >= 0)
+//   - updatedAt: int (required, > 0)
+//   - deleted: bool (required)
+//   - pinOrder: int (optional, 0..100)
+//
+// ===============================================================
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Helper Functions
+    // ===============================================================
+
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(uid) {
+      return isAuthenticated() && request.auth.uid == uid;
+    }
+
+    function uidUnchanged() {
+      return !('uid' in request.resource.data) ||
+             request.resource.data.uid == request.auth.uid;
+    }
+
+    function uidNotModified() {
+      return !('uid' in request.resource.data) ||
+             request.resource.data.uid == resource.data.uid;
+    }
+
+    function hasRequiredFields(data, fields) {
+      return data.keys().hasAll(fields);
+    }
+
+    function hasOnlyAllowedFields(data, fields) {
+      return data.keys().hasOnly(fields);
+    }
+
+    function areImmutableFieldsUnchanged(fields) {
+      return !request.resource.data.diff(resource.data).affectedKeys().hasAny(fields);
+    }
+
+    function isValidString(val, minLen, maxLen) {
+      return val is string && val.size() >= minLen && val.size() <= maxLen;
+    }
+
+    function isValidOptionalString(data, field, minLen, maxLen) {
+      return !(field in data) || isValidString(data[field], minLen, maxLen);
+    }
+
+    function isValidOptionalBool(data, field) {
+      return !(field in data) || data[field] is bool;
+    }
+
+    function isValidIntRange(val, minVal, maxVal) {
+      return val is int && val >= minVal && val <= maxVal;
+    }
+
+    function isValidOptionalIntRange(data, field, minVal, maxVal) {
+      return !(field in data) || isValidIntRange(data[field], minVal, maxVal);
+    }
+
+    function isValidOptionalNumberRange(data, field, minVal, maxVal) {
+      return !(field in data) ||
+             ((data[field] is int || data[field] is float) &&
+              data[field] >= minVal &&
+              data[field] <= maxVal);
+    }
+
+    function isValidUrl(url) {
+      return url is string &&
+             (url.matches("^https://.*") || url.matches("^http://.*"));
+    }
+
+    function isValidOptionalOrEmptyUrl(url, maxLen) {
+      return url is string &&
+             url.size() <= maxLen &&
+             (url.size() == 0 || isValidUrl(url));
+    }
+
+    function isValidEmail(email) {
+      return email is string &&
+             email.matches("^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$");
+    }
+
+    // ===============================================================
+    // Domain Validators
+    // ===============================================================
+
+    function isValidUserProfile(data) {
+      return data.keys().size() <= 4 &&
+             hasRequiredFields(data, ['updatedAt']) &&
+             hasOnlyAllowedFields(data, ['displayName', 'email', 'provider', 'updatedAt']) &&
+             data.updatedAt is int && data.updatedAt > 0 &&
+             isValidOptionalString(data, 'displayName', 0, 100) &&
+             (!('email' in data) ||
+              (isValidString(data.email, 0, 254) &&
+               (data.email.size() == 0 || isValidEmail(data.email)))) &&
+             isValidOptionalString(data, 'provider', 0, 40);
+    }
+
+    function isValidTrackCore(data, videoId) {
+      return isValidString(data.videoId, 1, 64) &&
+             data.videoId == videoId &&
+             isValidString(data.title, 1, 300) &&
+             isValidString(data.artists, 0, 300) &&
+             isValidString(data.album, 0, 300) &&
+             isValidIntRange(data.durationMs, 0, 86400000) &&
+             isValidOptionalOrEmptyUrl(data.thumbnailUrl, 1024) &&
+             data.addedAt is int && data.addedAt >= 0 &&
+             data.updatedAt is int && data.updatedAt > 0 &&
+             data.deleted is bool;
+    }
+
+    function isValidLike(data, videoId) {
+      let required = [
+        'videoId', 'title', 'artists', 'album',
+        'durationMs', 'thumbnailUrl', 'addedAt', 'updatedAt', 'deleted'
+      ];
+      return data.keys().size() <= 12 &&
+             hasRequiredFields(data, required) &&
+             hasOnlyAllowedFields(data, required) &&
+             isValidTrackCore(data, videoId);
+    }
+
+    function isValidTrackIdList(trackIds) {
+      return trackIds is list &&
+             trackIds.size() <= 2000 &&
+             (trackIds.size() == 0 ||
+              (isValidString(trackIds[0], 1, 64) &&
+               isValidString(trackIds[trackIds.size() - 1], 1, 64)));
+    }
+
+    function isValidPlaylist(data, playlistId) {
+      let required = [
+        'playlistId', 'name', 'createdAt', 'updatedAt', 'trackIds', 'deleted'
+      ];
+      let allowed = [
+        'playlistId', 'name', 'createdAt', 'updatedAt', 'trackIds', 'deleted',
+        'description', 'artworkUrl'
+      ];
+      return data.keys().size() <= 10 &&
+             hasRequiredFields(data, required) &&
+             hasOnlyAllowedFields(data, allowed) &&
+             isValidString(data.playlistId, 1, 64) &&
+             data.playlistId == playlistId &&
+             isValidString(data.name, 1, 200) &&
+             data.createdAt is int && data.createdAt >= 0 &&
+             data.updatedAt is int && data.updatedAt > 0 &&
+             isValidTrackIdList(data.trackIds) &&
+             data.deleted is bool &&
+             isValidOptionalString(data, 'description', 0, 500) &&
+             (!('artworkUrl' in data) || isValidOptionalOrEmptyUrl(data.artworkUrl, 1024));
+    }
+
+    function isValidPlaylistTrack(data, videoId) {
+      let required = [
+        'videoId', 'title', 'artists', 'album',
+        'durationMs', 'thumbnailUrl', 'addedAt', 'updatedAt', 'deleted'
+      ];
+      let allowed = [
+        'videoId', 'title', 'artists', 'album',
+        'durationMs', 'thumbnailUrl', 'addedAt', 'updatedAt', 'deleted',
+        'orderIndex'
+      ];
+      return data.keys().size() <= 12 &&
+             hasRequiredFields(data, required) &&
+             hasOnlyAllowedFields(data, allowed) &&
+             isValidTrackCore(data, videoId) &&
+             isValidOptionalIntRange(data, 'orderIndex', 0, 5000);
+    }
+
+    function isValidLibraryItem(data, itemId) {
+      let required = [
+        'itemId', 'itemType', 'title', 'subtitle',
+        'thumbnailUrl', 'addedAt', 'updatedAt', 'deleted'
+      ];
+      return data.keys().size() <= 10 &&
+             hasRequiredFields(data, required) &&
+             hasOnlyAllowedFields(data, required) &&
+             isValidString(data.itemId, 1, 128) &&
+             data.itemId == itemId &&
+             data.itemType in ['album', 'artist', 'playlist', 'song'] &&
+             isValidString(data.title, 1, 300) &&
+             isValidString(data.subtitle, 0, 300) &&
+             isValidOptionalOrEmptyUrl(data.thumbnailUrl, 1024) &&
+             data.addedAt is int && data.addedAt >= 0 &&
+             data.updatedAt is int && data.updatedAt > 0 &&
+             data.deleted is bool;
+    }
+
+    function isValidHistoryEntry(data, entryId) {
+      let required = [
+        'entryId', 'videoId', 'title', 'artists', 'album',
+        'durationMs', 'thumbnailUrl', 'playedAt', 'updatedAt', 'deleted'
+      ];
+      return data.keys().size() <= 12 &&
+             hasRequiredFields(data, required) &&
+             hasOnlyAllowedFields(data, required) &&
+             isValidString(data.entryId, 1, 128) &&
+             data.entryId == entryId &&
+             isValidString(data.videoId, 1, 64) &&
+             isValidString(data.title, 1, 300) &&
+             isValidString(data.artists, 0, 300) &&
+             isValidString(data.album, 0, 300) &&
+             isValidIntRange(data.durationMs, 0, 86400000) &&
+             isValidOptionalOrEmptyUrl(data.thumbnailUrl, 1024) &&
+             data.playedAt is int && data.playedAt >= 0 &&
+             data.updatedAt is int && data.updatedAt > 0 &&
+             data.deleted is bool;
+    }
+
+    function isValidSettingsPreferences(data) {
+      let allowed = [
+        'updatedAt', 'deleted', 'schemaVersion',
+        // Library & appearance (snake_case + camelCase)
+        'library_layout_mode', 'libraryLayoutMode', 'layoutMode',
+        'library_sort_order', 'librarySortOrder', 'sortOrder',
+        'library_filter_tab', 'libraryFilterTab', 'filterTab',
+        'offline_cache_enabled', 'offlineCacheEnabled',
+        'ui_glass_intensity', 'uiGlassIntensity', 'glassIntensity',
+        'ui_ambient_vivid_player', 'uiAmbientVividPlayer', 'ambientVividPlayer',
+        'ui_dock_fold_on_scroll', 'uiDockFoldOnScroll', 'dockFoldOnScroll',
+        'themeMode', 'language', 'contentLanguage',
+        // Audio & playback
+        'audio_crossfade_seconds', 'audioCrossfadeSeconds', 'crossfadeSeconds',
+        'audio_gapless_enabled', 'audioGaplessEnabled', 'gaplessEnabled',
+        'audio_stream_quality', 'audioStreamQuality', 'audioQuality',
+        'streaming_quality', 'streamingQuality',
+        'wifi_only', 'wifiOnlyStreaming',
+        'auto_retry', 'autoRetryOnNetworkLoss',
+        'cache_limit_mb', 'cacheLimitMb',
+        'image_cache_limit_mb', 'imageCacheLimitMb',
+        'audio_sound_preset', 'audioSoundPreset', 'soundPreset',
+        'player_scrubber_style', 'playerScrubberStyle', 'scrubberStyle',
+        'equalizerEnabled', 'equalizerPreset',
+        // Lyrics & translation
+        'lyrics_translation_enabled', 'lyricsTranslationEnabled',
+        'lyrics_romanization_enabled', 'lyricsRomanizationEnabled',
+        'lyrics_blur_unfocused', 'lyricsBlurUnfocused',
+        'lyrics_center_align', 'lyricsCenterAlign',
+        'lyrics_timing_offset_ms', 'lyricsTimingOffsetMs', 'lyricsOffsetMs',
+        // Privacy & Sound Lab
+        'privacy_pause_history', 'privacyPauseHistory', 'pauseHistory',
+        'mood_dial_angle', 'moodDialAngle',
+        'echo_mode_profile', 'echoModeProfile', 'echoProfile',
+        'echo_mode_intensity', 'echoModeIntensity', 'echoIntensity'
+      ];
+      return data.keys().size() <= 40 &&
+             hasRequiredFields(data, ['updatedAt']) &&
+             hasOnlyAllowedFields(data, allowed) &&
+             data.updatedAt is int && data.updatedAt > 0 &&
+             isValidOptionalBool(data, 'deleted') &&
+             isValidOptionalIntRange(data, 'schemaVersion', 1, 100) &&
+             // String preferences (bounded <= 64 chars)
+             isValidOptionalString(data, 'library_layout_mode', 0, 32) &&
+             isValidOptionalString(data, 'libraryLayoutMode', 0, 32) &&
+             isValidOptionalString(data, 'layoutMode', 0, 32) &&
+             isValidOptionalString(data, 'library_sort_order', 0, 32) &&
+             isValidOptionalString(data, 'librarySortOrder', 0, 32) &&
+             isValidOptionalString(data, 'sortOrder', 0, 32) &&
+             isValidOptionalString(data, 'library_filter_tab', 0, 64) &&
+             isValidOptionalString(data, 'libraryFilterTab', 0, 64) &&
+             isValidOptionalString(data, 'filterTab', 0, 64) &&
+             isValidOptionalString(data, 'ui_glass_intensity', 0, 32) &&
+             isValidOptionalString(data, 'uiGlassIntensity', 0, 32) &&
+             isValidOptionalString(data, 'glassIntensity', 0, 32) &&
+             isValidOptionalString(data, 'themeMode', 0, 32) &&
+             isValidOptionalString(data, 'language', 0, 32) &&
+             isValidOptionalString(data, 'contentLanguage', 0, 32) &&
+             isValidOptionalString(data, 'audio_stream_quality', 0, 32) &&
+             isValidOptionalString(data, 'audioStreamQuality', 0, 32) &&
+             isValidOptionalString(data, 'audioQuality', 0, 32) &&
+             isValidOptionalString(data, 'streaming_quality', 0, 32) &&
+             isValidOptionalString(data, 'streamingQuality', 0, 32) &&
+             isValidOptionalString(data, 'audio_sound_preset', 0, 64) &&
+             isValidOptionalString(data, 'audioSoundPreset', 0, 64) &&
+             isValidOptionalString(data, 'soundPreset', 0, 64) &&
+             isValidOptionalString(data, 'player_scrubber_style', 0, 32) &&
+             isValidOptionalString(data, 'playerScrubberStyle', 0, 32) &&
+             isValidOptionalString(data, 'scrubberStyle', 0, 32) &&
+             isValidOptionalString(data, 'equalizerPreset', 0, 64) &&
+             isValidOptionalString(data, 'echo_mode_profile', 0, 64) &&
+             isValidOptionalString(data, 'echoModeProfile', 0, 64) &&
+             isValidOptionalString(data, 'echoProfile', 0, 64) &&
+             // Boolean preferences
+             isValidOptionalBool(data, 'offline_cache_enabled') &&
+             isValidOptionalBool(data, 'offlineCacheEnabled') &&
+             isValidOptionalBool(data, 'ui_ambient_vivid_player') &&
+             isValidOptionalBool(data, 'uiAmbientVividPlayer') &&
+             isValidOptionalBool(data, 'ambientVividPlayer') &&
+             isValidOptionalBool(data, 'ui_dock_fold_on_scroll') &&
+             isValidOptionalBool(data, 'uiDockFoldOnScroll') &&
+             isValidOptionalBool(data, 'dockFoldOnScroll') &&
+             isValidOptionalBool(data, 'audio_gapless_enabled') &&
+             isValidOptionalBool(data, 'audioGaplessEnabled') &&
+             isValidOptionalBool(data, 'gaplessEnabled') &&
+             isValidOptionalBool(data, 'wifi_only') &&
+             isValidOptionalBool(data, 'wifiOnlyStreaming') &&
+             isValidOptionalBool(data, 'auto_retry') &&
+             isValidOptionalBool(data, 'autoRetryOnNetworkLoss') &&
+             isValidOptionalBool(data, 'equalizerEnabled') &&
+             isValidOptionalBool(data, 'lyrics_translation_enabled') &&
+             isValidOptionalBool(data, 'lyricsTranslationEnabled') &&
+             isValidOptionalBool(data, 'lyrics_romanization_enabled') &&
+             isValidOptionalBool(data, 'lyricsRomanizationEnabled') &&
+             isValidOptionalBool(data, 'lyrics_blur_unfocused') &&
+             isValidOptionalBool(data, 'lyricsBlurUnfocused') &&
+             isValidOptionalBool(data, 'lyrics_center_align') &&
+             isValidOptionalBool(data, 'lyricsCenterAlign') &&
+             isValidOptionalBool(data, 'privacy_pause_history') &&
+             isValidOptionalBool(data, 'privacyPauseHistory') &&
+             isValidOptionalBool(data, 'pauseHistory') &&
+             // Numeric preferences (bounded ranges)
+             isValidOptionalIntRange(data, 'audio_crossfade_seconds', 0, 30) &&
+             isValidOptionalIntRange(data, 'audioCrossfadeSeconds', 0, 30) &&
+             isValidOptionalIntRange(data, 'crossfadeSeconds', 0, 30) &&
+             isValidOptionalIntRange(data, 'cache_limit_mb', 0, 102400) &&
+             isValidOptionalIntRange(data, 'cacheLimitMb', 0, 102400) &&
+             isValidOptionalIntRange(data, 'image_cache_limit_mb', 0, 10240) &&
+             isValidOptionalIntRange(data, 'imageCacheLimitMb', 0, 10240) &&
+             isValidOptionalIntRange(data, 'lyrics_timing_offset_ms', -60000, 60000) &&
+             isValidOptionalIntRange(data, 'lyricsTimingOffsetMs', -60000, 60000) &&
+             isValidOptionalIntRange(data, 'lyricsOffsetMs', -60000, 60000) &&
+             isValidOptionalNumberRange(data, 'mood_dial_angle', -3600, 3600) &&
+             isValidOptionalNumberRange(data, 'moodDialAngle', -3600, 3600) &&
+             isValidOptionalNumberRange(data, 'echo_mode_intensity', 0, 10) &&
+             isValidOptionalNumberRange(data, 'echoModeIntensity', 0, 10) &&
+             isValidOptionalNumberRange(data, 'echoIntensity', 0, 10);
+    }
+
+    function isValidPin(data, videoId) {
+      let required = [
+        'videoId', 'title', 'artists', 'album',
+        'durationMs', 'thumbnailUrl', 'addedAt', 'updatedAt', 'deleted'
+      ];
+      let allowed = [
+        'videoId', 'title', 'artists', 'album',
+        'durationMs', 'thumbnailUrl', 'addedAt', 'updatedAt', 'deleted',
+        'pinOrder'
+      ];
+      return data.keys().size() <= 12 &&
+             hasRequiredFields(data, required) &&
+             hasOnlyAllowedFields(data, allowed) &&
+             isValidTrackCore(data, videoId) &&
+             isValidOptionalIntRange(data, 'pinOrder', 0, 100);
+    }
+
+    // ===============================================================
+    // User Subtree Rules (/users/{uid}/**)
+    // ===============================================================
+
+    match /users/{uid} {
+      allow read, delete: if isOwner(uid);
+      allow create, update: if isOwner(uid) && isValidUserProfile(request.resource.data);
+
+      match /likes/{videoId} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid) && isValidLike(request.resource.data, videoId);
+      }
+
+      match /playlists/{playlistId} {
+        allow read, delete: if isOwner(uid);
+        allow create: if isOwner(uid) && isValidPlaylist(request.resource.data, playlistId);
+        allow update: if isOwner(uid) &&
+                         isValidPlaylist(request.resource.data, playlistId) &&
+                         request.resource.data.createdAt == resource.data.createdAt;
+
+        match /tracks/{videoId} {
+          allow read, delete: if isOwner(uid);
+          allow create, update: if isOwner(uid) && isValidPlaylistTrack(request.resource.data, videoId);
+        }
+      }
+
+      match /libraryItems/{itemId} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid) && isValidLibraryItem(request.resource.data, itemId);
+      }
+
+      match /history/{entryId} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid) && isValidHistoryEntry(request.resource.data, entryId);
+      }
+
+      match /settings/{docId} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid) &&
+                                 docId == 'preferences' &&
+                                 isValidSettingsPreferences(request.resource.data);
+      }
+
+      match /pins/{videoId} {
+        allow read, delete: if isOwner(uid);
+        allow create, update: if isOwner(uid) && isValidPin(request.resource.data, videoId);
+      }
+    }
+
+    // ===============================================================
+    // Explicit Default Deny
+    // ===============================================================
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

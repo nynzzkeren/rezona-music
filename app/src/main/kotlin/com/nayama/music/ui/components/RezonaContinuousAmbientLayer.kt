@@ -23,20 +23,21 @@ import kotlin.random.Random
 
 /**
  * Provides the active track's ambient cover color to all glass surfaces
- * so baked glass tints carry a faint influence of the cover art (rezona_core.md).
+ * so baked glass tints carry the cover color family (rezona_player_v3.md Part 1).
  */
-val LocalAmbientAccentColor = compositionLocalOf { Color(0xFF28344A) }
+val LocalAmbientAccentColor = compositionLocalOf { Color(0xFF282F3A) }
+val LocalAmbientBaseColor = compositionLocalOf { Color(0xFF1A1E24) }
+val LocalTintedGlassColor = compositionLocalOf { Color(0x6B2E3540) }
 
 /**
- * Derives ambient background colors from the active track.
- * Respects desaturated atmospheric bleed per MASTER.md and rezona_core.md.
+ * Fallback deterministic ambient colors when cover artwork has not loaded yet.
  */
 fun deriveAmbientColors(track: RezonaTrack?): Triple<Color, Color, Color> {
     if (track == null) {
         return Triple(
-            Color(0xFF1D2838),
-            Color(0xFF141A24),
-            Color(0xFF0F141E)
+            Color(0xFF1D2430),
+            Color(0xFF161C26),
+            Color(0xFF12161E)
         )
     }
 
@@ -44,9 +45,9 @@ fun deriveAmbientColors(track: RezonaTrack?): Triple<Color, Color, Color> {
     val palette = MOCK_PALETTES[hash % MOCK_PALETTES.size]
 
     return Triple(
-        palette.ambient.copy(alpha = 0.62f),
-        palette.primary.copy(alpha = 0.46f),
-        palette.secondary.copy(alpha = 0.34f)
+        palette.ambient,
+        palette.primary,
+        palette.secondary
     )
 }
 
@@ -55,32 +56,37 @@ fun deriveAmbientColors(track: RezonaTrack?): Triple<Color, Color, Color> {
  */
 private val NOISE_POINTS_LIGHT: FloatArray by lazy {
     val rng = Random(0x52455A4F)
-    FloatArray(360 * 2) { rng.nextFloat() }
+    FloatArray(420 * 2) { rng.nextFloat() }
 }
 
 private val NOISE_POINTS_DARK: FloatArray by lazy {
     val rng = Random(0x4E415941)
-    FloatArray(360 * 2) { rng.nextFloat() }
+    FloatArray(420 * 2) { rng.nextFloat() }
 }
 
 /**
- * 0.1 BACKGROUND SEAM FIX:
- * ONE full-screen continuous layer drawn behind everything, edge-to-edge
- * (behind status bar and navigation bar).
- * Base dark gradient + 3 large soft radial gradients of the cover colors
- * with long smooth falloff + subtle dither noise in a single Canvas.
- * Crossfades over 700ms between tracks. Shared by all screens.
+ * Continuous Full-Screen Ambient Layer (Part 1 Cover-to-Background Blend):
+ * - Drawn edge-to-edge behind all screens & Now Playing (no clipped boxes, no purple/black blocks)
+ * - Uses cover-derived `ambientBase` as the continuous foundation color so the cover fade dissolves
+ *   into the exact same color family, enhanced with soft cover-hue radial glows & subtle dither noise.
+ * - Crossfades smoothly over 700ms between tracks.
  */
 @Composable
 fun RezonaContinuousAmbientLayer(
     primaryColor: Color,
     secondaryColor: Color,
-    tertiaryColor: Color = Color(0xFF10141D),
+    tertiaryColor: Color = Color(0xFF151920),
+    ambientBase: Color = primaryColor,
     vividMode: Boolean = false,
     modifier: Modifier = Modifier
 ) {
-    val boost = if (vividMode) 1.22f else 1.0f
+    val boost = if (vividMode) 1.18f else 0.96f
 
+    val animBase by animateColorAsState(
+        targetValue = ambientBase,
+        animationSpec = tween(durationMillis = 700, easing = FastOutSlowInEasing),
+        label = "ambient_bg_base"
+    )
     val animPrimary by animateColorAsState(
         targetValue = primaryColor,
         animationSpec = tween(durationMillis = 700, easing = FastOutSlowInEasing),
@@ -97,8 +103,8 @@ fun RezonaContinuousAmbientLayer(
         label = "ambient_bg_tertiary"
     )
 
-    val lightDitherOffsets = remember { ArrayList<Offset>(360) }
-    val darkDitherOffsets = remember { ArrayList<Offset>(360) }
+    val lightDitherOffsets = remember { ArrayList<Offset>(420) }
+    val darkDitherOffsets = remember { ArrayList<Offset>(420) }
 
     Canvas(
         modifier = modifier
@@ -109,68 +115,52 @@ fun RezonaContinuousAmbientLayer(
         val h = size.height
         val maxDim = maxOf(w, h)
 
-        // 1. Deep OLED Obsidian Base Gradient
-        drawRect(
-            brush = Brush.verticalGradient(
-                colors = listOf(
-                    Color(0xFF0C0E13),
-                    Color(0xFF08090C),
-                    Color(0xFF050608),
-                    Color(0xFF030406)
-                ),
-                startY = 0f,
-                endY = h
-            ),
-            size = size
-        )
+        // 1. Solid continuous cover-matched ambientBase foundation (NO forced black or purple!)
+        drawRect(color = animBase, size = size)
 
-        // 2. Large soft radial gradient 1: Top-left / upper-mid aura with long falloff
+        // 2. Soft upper radial glow from cover dominant swatch
         drawRect(
             brush = Brush.radialGradient(
                 colors = listOf(
-                    animPrimary.copy(alpha = (0.52f * boost).coerceAtMost(0.75f)),
-                    animPrimary.copy(alpha = (0.28f * boost).coerceAtMost(0.45f)),
-                    animPrimary.copy(alpha = 0.11f),
-                    animPrimary.copy(alpha = 0.03f),
+                    animPrimary.copy(alpha = (0.36f * boost).coerceAtMost(0.54f)),
+                    animPrimary.copy(alpha = (0.16f * boost).coerceAtMost(0.28f)),
                     Color.Transparent
                 ),
-                center = Offset(w * 0.34f, h * 0.22f),
-                radius = maxDim * 0.92f
+                center = Offset(w * 0.30f, h * 0.28f),
+                radius = maxDim * 0.85f
             ),
             size = size
         )
 
-        // 3. Large soft radial gradient 2: Lower-right overlapping aura with long falloff
+        // 3. Soft lower-right overlapping radial glow from cover secondary swatch
         drawRect(
             brush = Brush.radialGradient(
                 colors = listOf(
-                    animSecondary.copy(alpha = (0.44f * boost).coerceAtMost(0.65f)),
-                    animSecondary.copy(alpha = (0.22f * boost).coerceAtMost(0.38f)),
-                    animSecondary.copy(alpha = 0.08f),
+                    animSecondary.copy(alpha = (0.32f * boost).coerceAtMost(0.48f)),
+                    animSecondary.copy(alpha = (0.14f * boost).coerceAtMost(0.24f)),
                     Color.Transparent
                 ),
-                center = Offset(w * 0.72f, h * 0.76f),
-                radius = maxDim * 0.95f
+                center = Offset(w * 0.78f, h * 0.78f),
+                radius = maxDim * 0.90f
             ),
             size = size
         )
 
-        // 4. Large soft radial gradient 3: Mid-left bridge aura so top & bottom blend seamlessly
+        // 4. Subtle deeper lower-left grounding gradient in same hue family
         drawRect(
             brush = Brush.radialGradient(
                 colors = listOf(
-                    animTertiary.copy(alpha = (0.36f * boost).coerceAtMost(0.55f)),
-                    animTertiary.copy(alpha = 0.14f),
-                    animTertiary.copy(alpha = 0.04f),
+                    animTertiary.copy(alpha = 0.42f),
+                    animTertiary.copy(alpha = 0.16f),
                     Color.Transparent
                 ),
-                center = Offset(w * 0.22f, h * 0.52f),
-                radius = maxDim * 0.82f
+                center = Offset(w * 0.18f, h * 0.88f),
+                radius = maxDim * 0.78f
             ),
             size = size
         )
 
-        // 5. Subtle procedural dither noise grain to prevent 8-bit gradient banding
+        // 5. Anti-banding micro-dither grain
         if (lightDitherOffsets.isEmpty() && w > 0f && h > 0f) {
             var i = 0
             while (i < NOISE_POINTS_LIGHT.size) {
@@ -190,7 +180,7 @@ fun RezonaContinuousAmbientLayer(
             drawPoints(
                 points = darkDitherOffsets,
                 pointMode = PointMode.Points,
-                color = Color(0x08000000),
+                color = Color(0x06000000),
                 strokeWidth = 1.5f,
                 cap = StrokeCap.Round
             )
