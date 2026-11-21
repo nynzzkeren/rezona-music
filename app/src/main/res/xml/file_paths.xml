@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<paths>
+    <cache-path name="shared_posters" path="posters/" />
+    <cache-path name="shared_cards" path="shared_cards/" />
+    <cache-path name="cache_root" path="." />
+    <external-files-path name="posters" path="Pictures/Rezona/" />
+</paths>

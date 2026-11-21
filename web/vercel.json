@@ -1,0 +1,19 @@
+{
+  "version": 2,
+  "cleanUrls": true,
+  "rewrites": [
+    { "source": "/download", "destination": "/Rezona-release.apk" },
+    { "source": "/download-release", "destination": "/Rezona-release.apk" },
+    { "source": "/app-release.apk", "destination": "/Rezona-release.apk" }
+  ],
+  "headers": [
+    {
+      "source": "/Rezona-release.apk",
+      "headers": [
+        { "key": "Content-Type", "value": "application/vnd.android.package-archive" },
+        { "key": "Content-Disposition", "value": "attachment; filename=\"Rezona-release.apk\"" },
+        { "key": "Cache-Control", "value": "public, max-age=300" }
+      ]
+    }
+  ]
+}
