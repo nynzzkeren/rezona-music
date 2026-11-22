@@ -2,6 +2,8 @@ package com.nayama.music.ui
 
 import android.app.ActivityManager
 import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -36,6 +38,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import com.nayama.music.auth.FirebaseAuthManager
+import com.nayama.music.backend.RezonaUpdateChecker
+import com.nayama.music.backend.RezonaUpdateInfo
 import com.nayama.music.data.preferences.RezonaPreferences
 import com.nayama.music.navigation.RezonaTab
 import com.nayama.music.playback.RezonaPlayerController
@@ -68,6 +72,7 @@ import com.nayama.music.ui.theme.SoftSilver
 import com.nayama.music.ui.theme.Typography
 import com.nayama.music.ui.you.RezonaYouScreen
 import dev.chrisbanes.haze.HazeState
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 private fun isLowEndDevice(context: Context): Boolean {
@@ -127,6 +132,15 @@ fun RezonaApp() {
     var settingsSection by remember { mutableStateOf<String?>(null) }
     var isSettingsVisible by remember { mutableStateOf(false) }
     var isSoundLabVisible by remember { mutableStateOf(false) }
+    var availableUpdate by remember { mutableStateOf<RezonaUpdateInfo?>(null) }
+
+    LaunchedEffect(Unit) {
+        val dismissedVersion = preferences.dismissedUpdateVersionFlow.first()
+        val info = RezonaUpdateChecker.checkForUpdate()
+        if (info != null && info.versionCode > dismissedVersion) {
+            availableUpdate = info
+        }
+    }
 
     val currentTrack = playerController.currentTrack.value
     LaunchedEffect(currentTrack) {
@@ -372,6 +386,34 @@ fun RezonaApp() {
                                 .heightIn(min = 48.dp)
                         )
                     }
+                }
+            }
+
+            // 8. In-App Update Notifier
+            availableUpdate?.let { updateInfo ->
+                RezonaGlassDialog(
+                    title = "Update Available · v${updateInfo.versionName}",
+                    onDismissRequest = {
+                        scope.launch {
+                            preferences.setDismissedUpdateVersion(updateInfo.versionCode)
+                        }
+                        availableUpdate = null
+                    },
+                    confirmText = "Download APK",
+                    onConfirm = {
+                        runCatching {
+                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(updateInfo.apkUrl))
+                            context.startActivity(intent)
+                        }
+                        availableUpdate = null
+                    },
+                    dismissText = "Later"
+                ) {
+                    Text(
+                        text = updateInfo.changelog,
+                        style = Typography.bodyMedium,
+                        color = PearlWhite
+                    )
                 }
             }
         }

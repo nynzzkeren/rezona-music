@@ -17,6 +17,8 @@ import com.nayama.music.backend.LyricSourceId
 import com.nayama.music.backend.LyricsProvider
 import com.nayama.music.backend.MusicEngineRepository
 import com.nayama.music.backend.ResolvedVideoVariant
+import com.nayama.music.backend.SkipSegment
+import com.nayama.music.backend.SponsorBlockRepository
 import com.nayama.music.backend.VideoQualitySelector
 import com.nayama.music.data.local.PlaybackHistoryEntity
 import com.nayama.music.data.local.RezonaDatabase
@@ -119,6 +121,10 @@ class RezonaPlayerController(
     // Part 4: Frame-synced Lyrics clock snap signal
     var seekEventSeq = mutableLongStateOf(0L)
         private set
+
+    // SponsorBlock Skip Intro / Non-Music Segments
+    private var activeSkipSegments: List<SkipSegment> = emptyList()
+    private val skippedSegmentIds = HashSet<String>()
 
     // Active Queue & Time Machine History
     val queue = mutableStateListOf<RezonaTrack>()
@@ -331,6 +337,8 @@ class RezonaPlayerController(
         likeObserverJob = scope.launch {
             repo.isLiked(trackId).collect { liked ->
                 isLiked.value = liked
+                musicPlayer?.updateSessionCustomLayout()
+                context?.let { com.nayama.music.widget.RezonaWidgetUpdater.updateAll(it) }
             }
         }
     }
@@ -415,7 +423,25 @@ class RezonaPlayerController(
                     return@launch
                 } else {
                     currentPositionMs.longValue = if (dur > 0) nextPos.coerceAtMost(dur) else nextPos
+                    checkAndSkipNonMusicSegment(currentPositionMs.longValue)
+                    context?.let { com.nayama.music.widget.RezonaWidgetUpdater.updateAll(it) }
                 }
+            }
+        }
+    }
+
+    private fun checkAndSkipNonMusicSegment(posMs: Long) {
+        val seg = activeSkipSegments.firstOrNull { s ->
+            s.uuid !in skippedSegmentIds && posMs in s.startMs until (s.endMs - 400L)
+        } ?: return
+        skippedSegmentIds.add(seg.uuid)
+        val dur = durationMs.longValue
+        if (seg.category == "outro" && dur > 0L && seg.endMs >= dur - 2500L) {
+            onCurrentTrackEnded(currentTrack.value?.id ?: return)
+        } else {
+            seekToPosition(seg.endMs)
+            context?.let {
+                Toast.makeText(it, "Skipped ${seg.category.replace('_', ' ')}", Toast.LENGTH_SHORT).show()
             }
         }
     }
@@ -456,6 +482,8 @@ class RezonaPlayerController(
         currentResolvedAudioUrl = null
         currentVideoVariants = emptyList()
         videoPausedForBackground = false
+        activeSkipSegments = emptyList()
+        skippedSegmentIds.clear()
         seekEventSeq.longValue += 1L
         stopTicker()
         currentTrack.value = track
@@ -554,7 +582,22 @@ class RezonaPlayerController(
                     }
                 }
 
-                // 3. Auto-queue YouTube Music radio if requested
+                // 3. Fetch SponsorBlock non-music intro/outro segments if enabled
+                launch {
+                    val skipEnabled = preferences?.skipIntroEnabledFlow?.first() ?: true
+                    if (skipEnabled && !track.id.startsWith("local_")) {
+                        val vid = com.nayama.music.sync.RezonaSyncLogic.extractVideoId(track.id, track.streamUrl)
+                        val segs = SponsorBlockRepository.getNonMusicSegments(vid)
+                        withContext(Dispatchers.Main) {
+                            if (currentTrack.value?.id == track.id) {
+                                activeSkipSegments = segs
+                                checkAndSkipNonMusicSegment(currentPositionMs.longValue)
+                            }
+                        }
+                    }
+                }
+
+                // 4. Auto-queue YouTube Music radio if requested
                 if (autoQueueRadio && !track.id.startsWith("local_")) {
                     runCatching {
                         val radio = musicEngine.getRadioSeeds(track).filter { it.id != track.id }
@@ -830,7 +873,20 @@ class RezonaPlayerController(
 
     fun toggleLike() {
         val track = currentTrack.value ?: return
-        isLiked.value = !isLiked.value
+        val nextLiked = !isLiked.value
+        isLiked.value = nextLiked
+        musicPlayer?.updateSessionCustomLayout()
+        context?.let {
+            NayamaMediaService.start(
+                context = it,
+                title = track.title,
+                artist = track.artist,
+                artworkUrl = track.coverArtUrl,
+                isPlaying = isPlaying.value,
+                isLiked = nextLiked
+            )
+            com.nayama.music.widget.RezonaWidgetUpdater.updateAll(it)
+        }
         libraryRepo?.let { repo ->
             scope.launch(Dispatchers.IO) {
                 runCatching { repo.toggleLikeTrack(track) }

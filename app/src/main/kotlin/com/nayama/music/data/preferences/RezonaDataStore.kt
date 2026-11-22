@@ -64,6 +64,10 @@ class RezonaPreferences(private val context: Context) {
         val KEY_VIDEO_QUALITY = stringPreferencesKey("video_stream_quality")
         val KEY_VIDEO_HQ_WIFI_ONLY = booleanPreferencesKey("video_hq_wifi_only")
 
+        // Skip Intro & Update Notifier
+        val KEY_SKIP_INTRO_ENABLED = booleanPreferencesKey("playback_skip_intro_enabled")
+        val KEY_DISMISSED_UPDATE_VERSION = intPreferencesKey("update_dismissed_version_code")
+
         // Privacy & History
         val KEY_PAUSE_HISTORY = booleanPreferencesKey("privacy_pause_history")
 
@@ -242,6 +246,14 @@ class RezonaPreferences(private val context: Context) {
         prefs[KEY_VIDEO_HQ_WIFI_ONLY] ?: true
     }
 
+    val skipIntroEnabledFlow: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[KEY_SKIP_INTRO_ENABLED] ?: true
+    }
+
+    val dismissedUpdateVersionFlow: Flow<Int> = context.dataStore.data.map { prefs ->
+        prefs[KEY_DISMISSED_UPDATE_VERSION] ?: 0
+    }
+
     val pauseHistoryFlow: Flow<Boolean> = context.dataStore.data.map { prefs ->
         prefs[KEY_PAUSE_HISTORY] ?: false
     }
@@ -327,6 +339,14 @@ class RezonaPreferences(private val context: Context) {
 
     suspend fun setVideoHqWifiOnly(enabled: Boolean) {
         context.dataStore.edit { it[KEY_VIDEO_HQ_WIFI_ONLY] = enabled }
+    }
+
+    suspend fun setSkipIntroEnabled(enabled: Boolean) {
+        context.dataStore.edit { it[KEY_SKIP_INTRO_ENABLED] = enabled }
+    }
+
+    suspend fun setDismissedUpdateVersion(versionCode: Int) {
+        context.dataStore.edit { it[KEY_DISMISSED_UPDATE_VERSION] = versionCode }
     }
 
     suspend fun setPauseHistory(paused: Boolean) = editSyncedSetting { it[KEY_PAUSE_HISTORY] = paused }

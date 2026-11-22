@@ -84,6 +84,7 @@ fun RezonaSettingsScreen(
     val pauseHistory by preferences.pauseHistoryFlow.collectAsState(initial = false)
     val videoQuality by preferences.videoQualityFlow.collectAsState(initial = "480p")
     val videoHqWifiOnly by preferences.videoHqWifiOnlyFlow.collectAsState(initial = true)
+    val skipIntroEnabled by preferences.skipIntroEnabledFlow.collectAsState(initial = true)
     val lyricsStyle by preferences.lyricsStyleFlow.collectAsState(initial = com.nayama.music.ui.lyrics.LyricsStyleConfig())
 
     var showLicenses by remember { mutableStateOf(false) }
@@ -230,6 +231,12 @@ fun RezonaSettingsScreen(
                             }
                         }
                     }
+                    SettingsToggleRow(
+                        title = "Skip Non-Music Intro/Outro",
+                        subtitle = "Auto-skip spoken intros/outros via SponsorBlock",
+                        checked = skipIntroEnabled,
+                        onCheckedChange = { coroutineScope.launch { preferences.setSkipIntroEnabled(it) } }
+                    )
                     SettingsToggleRow(
                         title = "High quality on Wi-Fi only",
                         subtitle = "Cap cellular music video at 480p to save mobile data",

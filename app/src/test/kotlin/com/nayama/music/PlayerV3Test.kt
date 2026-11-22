@@ -2,6 +2,8 @@ package com.nayama.music
 
 import androidx.compose.ui.graphics.Color
 import com.nayama.music.backend.ResolvedVideoVariant
+import com.nayama.music.backend.RezonaUpdateChecker
+import com.nayama.music.backend.SponsorBlockRepository
 import com.nayama.music.backend.VideoQualitySelector
 import com.nayama.music.model.LyricWord
 import com.nayama.music.model.SyncedLyricLine
@@ -18,6 +20,7 @@ import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotEquals
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.nio.ByteBuffer
@@ -227,5 +230,36 @@ class PlayerV3Test {
         assertTrue(cfg.lineHeightSp > cfg.fontSizeSp)
         assertNotNull(LyricsFontFamilyOption.fromId("PLAYFAIR_DISPLAY"))
         assertNotEquals(LyricsFontFamilyOption.SATOSHI, LyricsFontFamilyOption.fromId("BEBAS_NEUE"))
+    }
+
+    // ── PART 6: SponsorBlock Segment Parsing & Update Checker ────────────────
+
+    @Test
+    fun part6_sponsorBlockParsingAndUpdateChecker() {
+        val rawSegments = """
+            [
+              {"UUID":"u2","category":"outro","segment":[190.5,205.0]},
+              {"UUID":"u1","category":"intro","segment":[0.0,14.2]},
+              {"UUID":"u_short","category":"music_offtopic","segment":[40.0,40.8]}
+            ]
+        """.trimIndent()
+        val parsed = SponsorBlockRepository.parseSegmentsJson(rawSegments)
+        assertEquals(2, parsed.size)
+        assertEquals("intro", parsed[0].category)
+        assertEquals(0L, parsed[0].startMs)
+        assertEquals(14200L, parsed[0].endMs)
+        assertEquals("outro", parsed[1].category)
+        assertEquals(190500L, parsed[1].startMs)
+
+        val updateJson = """
+            {"versionCode":2,"versionName":"1.0.1","apkUrl":"https://example.com/app.apk","changelog":"Liquid Glass Widgets + Skip Intro"}
+        """.trimIndent()
+        val infoNewer = RezonaUpdateChecker.parseAndCheck(updateJson, currentVersionCode = 1)
+        assertNotNull(infoNewer)
+        assertEquals(2, infoNewer?.versionCode)
+        assertEquals("1.0.1", infoNewer?.versionName)
+
+        val infoSame = RezonaUpdateChecker.parseAndCheck(updateJson, currentVersionCode = 2)
+        assertNull(infoSame)
     }
 }

@@ -25,10 +25,12 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
 import androidx.compose.foundation.interaction.MutableInteractionSource
+import androidx.compose.foundation.interaction.collectIsDraggedAsState
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -39,6 +41,9 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -504,8 +509,8 @@ private fun ButterSmoothLyricsCanvasList(
     onOpenSourcePicker: () -> Unit
 ) {
     val scope = rememberCoroutineScope()
-    val density = LocalDensity.current
     val textMeasurer = rememberTextMeasurer(cacheSize = 128)
+    val density = LocalDensity.current
 
     // Pre-resolved FontFamily and TextStyle (invalidates cached layouts cleanly when style changes)
     val fontFamily = remember(lyricsStyle.fontFamily) { lyricsStyle.fontFamily.toComposeFontFamily() }
@@ -521,136 +526,92 @@ private fun ButterSmoothLyricsCanvasList(
         )
     }
 
-    // Measured line top positions & heights in content space
-    val lineTopsPx = remember(trackId, lyrics) { mutableStateMapOf<Int, Float>() }
-    val lineHeightsPx = remember(trackId, lyrics) { mutableStateMapOf<Int, Float>() }
-    var totalContentHeightPx by remember(trackId, lyrics) { mutableFloatStateOf(0f) }
-
-    // ONE Animatable scroll offset (px in content space)
-    val scrollAnim = remember(trackId) { Animatable(0f) }
+    val listState = rememberLazyListState()
+    val isUserDragging by listState.interactionSource.collectIsDraggedAsState()
     var userPausedAutoScroll by remember(trackId) { mutableStateOf(false) }
     var resumeAutoJob by remember { mutableStateOf<Job?>(null) }
 
-    val targetAnchorY = viewportHeightPx * 0.30f
+    val targetAnchorYPx = (viewportHeightPx * 0.28f).toInt().coerceAtLeast(0)
 
-    fun maxScrollPx(): Float = (totalContentHeightPx - viewportHeightPx * 0.55f).coerceAtLeast(0f)
-
-    fun computeTargetScrollForLine(idx: Int): Float {
-        val top = lineTopsPx[idx] ?: return scrollAnim.value
-        val h = lineHeightsPx[idx] ?: 0f
-        return (top + h * 0.35f - targetAnchorY).coerceIn(0f, maxScrollPx())
-    }
-
-    // Keep active line anchored cleanly without jump when style or orientation changes
-    LaunchedEffect(lyricsStyle, contentWidthPx, viewportHeightPx) {
-        delay(32L)
-        val idx = floor(clock.focusIndex.floatValue).toInt().coerceIn(0, (lyrics.size - 1).coerceAtLeast(0))
-        if (lineTopsPx.containsKey(idx) && !userPausedAutoScroll) {
-            scrollAnim.snapTo(computeTargetScrollForLine(idx))
+    LaunchedEffect(isUserDragging) {
+        if (isUserDragging) {
+            userPausedAutoScroll = true
+            resumeAutoJob?.cancel()
+        } else if (userPausedAutoScroll) {
+            resumeAutoJob?.cancel()
+            resumeAutoJob = scope.launch {
+                delay(3000L)
+                userPausedAutoScroll = false
+            }
         }
     }
 
-    // Smoothly spring-scroll ONE Animatable toward the active line center whenever active line updates
+    // Keep active line anchored cleanly when style or viewport changes
+    LaunchedEffect(lyricsStyle, contentWidthPx, viewportHeightPx) {
+        if (lyrics.isEmpty() || userPausedAutoScroll) return@LaunchedEffect
+        val idx = floor(clock.focusIndex.floatValue).toInt().coerceIn(0, lyrics.lastIndex)
+        listState.scrollToItem(index = idx + 1, scrollOffset = -targetAnchorYPx)
+    }
+
+    // Smoothly auto-follow the active line via native LazyColumn scrolling (never clips or cuts off!)
     LaunchedEffect(trackId, lyrics, userPausedAutoScroll, viewportHeightPx) {
-        if (userPausedAutoScroll) return@LaunchedEffect
-        snapshotFlow { floor(clock.focusIndex.floatValue).toInt().coerceIn(0, (lyrics.size - 1).coerceAtLeast(0)) }
+        if (lyrics.isEmpty() || userPausedAutoScroll) return@LaunchedEffect
+        snapshotFlow { floor(clock.focusIndex.floatValue).toInt().coerceIn(0, lyrics.lastIndex) }
             .distinctUntilChanged()
             .collectLatest { activeIdx ->
-                if (!lineTopsPx.containsKey(activeIdx)) return@collectLatest
-                val target = computeTargetScrollForLine(activeIdx)
-                val delta = abs(target - scrollAnim.value)
-                if (delta > 3f) {
-                    val spec = if (delta > 560f) {
-                        // Large seek -> short critically-damped glide
-                        spring<Float>(dampingRatio = 1.0f, stiffness = 320f)
-                    } else {
-                        // Normal line transition -> silky zero-overshoot low-stiffness spring
-                        spring<Float>(dampingRatio = 0.92f, stiffness = 110f)
-                    }
-                    scrollAnim.animateTo(targetValue = target, animationSpec = spec)
-                }
+                listState.animateScrollToItem(
+                    index = activeIdx + 1,
+                    scrollOffset = -targetAnchorYPx
+                )
             }
     }
 
-    Box(
-        modifier = Modifier
-            .fillMaxSize()
-            .pointerInput(trackId, totalContentHeightPx, viewportHeightPx) {
-                detectVerticalDragGestures(
-                    onDragStart = {
-                        userPausedAutoScroll = true
-                        resumeAutoJob?.cancel()
-                    },
-                    onVerticalDrag = { _, dragAmount ->
-                        scope.launch {
-                            val next = (scrollAnim.value - dragAmount).coerceIn(0f, maxScrollPx())
-                            scrollAnim.snapTo(next)
-                        }
-                    },
-                    onDragEnd = {
-                        // Pause auto-follow for 3 seconds then smoothly glide back
-                        resumeAutoJob?.cancel()
-                        resumeAutoJob = scope.launch {
-                            delay(3000L)
-                            userPausedAutoScroll = false
-                        }
-                    },
-                    onDragCancel = {
-                        resumeAutoJob?.cancel()
-                        resumeAutoJob = scope.launch {
-                            delay(3000L)
-                            userPausedAutoScroll = false
-                        }
-                    }
-                )
-            }
-    ) {
-        // Content translated smoothly by ONE Animatable scroll offset in graphicsLayer (no recomposition!)
-        Column(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 24.dp)
-                .graphicsLayer {
-                    translationY = -scrollAnim.value
-                }
-                .onGloballyPositioned { coords ->
-                    totalContentHeightPx = coords.size.height.toFloat()
-                },
+    Box(modifier = Modifier.fillMaxSize()) {
+        LazyColumn(
+            state = listState,
+            modifier = Modifier.fillMaxSize(),
+            contentPadding = PaddingValues(
+                start = 24.dp,
+                end = 24.dp,
+                top = 12.dp,
+                bottom = 260.dp
+            ),
             verticalArrangement = Arrangement.spacedBy(lyricsStyle.lineSpacing.itemGapDp.dp)
         ) {
-            Spacer(modifier = Modifier.height(10.dp))
-
-            // Source switcher chip at top
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = if (lyricsStyle.centerAlign) Arrangement.Center else Arrangement.Start
-            ) {
+            item(key = "lyrics_source_header") {
                 Row(
-                    modifier = Modifier
-                        .heightIn(min = 42.dp)
-                        .clip(RoundedCornerShape(14.dp))
-                        .clickable(onClick = onOpenSourcePicker)
-                        .padding(horizontal = 4.dp, vertical = 6.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = if (lyricsStyle.centerAlign) Arrangement.Center else Arrangement.Start
                 ) {
-                    Text(
-                        text = lyricsSource,
-                        style = Typography.labelMedium.copy(fontSize = 12.sp, fontWeight = FontWeight.Medium),
-                        color = SmokySilver
-                    )
-                    Icon(
-                        painter = painterResource(id = R.drawable.ic_expand_more),
-                        contentDescription = "Choose lyrics source",
-                        tint = SmokySilver,
-                        modifier = Modifier.size(14.dp)
-                    )
+                    Row(
+                        modifier = Modifier
+                            .heightIn(min = 42.dp)
+                            .clip(RoundedCornerShape(14.dp))
+                            .clickable(onClick = onOpenSourcePicker)
+                            .padding(horizontal = 4.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Text(
+                            text = lyricsSource,
+                            style = Typography.labelMedium.copy(fontSize = 12.sp, fontWeight = FontWeight.Medium),
+                            color = SmokySilver
+                        )
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_expand_more),
+                            contentDescription = "Choose lyrics source",
+                            tint = SmokySilver,
+                            modifier = Modifier.size(14.dp)
+                        )
+                    }
                 }
             }
 
-            lyrics.forEachIndexed { index, line ->
+            itemsIndexed(
+                items = lyrics,
+                key = { idx, line -> "${idx}_${line.timeMs}" }
+            ) { index, line ->
                 val nextTime = lyrics.getOrNull(index + 1)?.timeMs ?: (line.timeMs + 4200L)
-                // Cache TextLayoutResult once per (line, style, width) — ZERO per-frame layout work!
                 val cachedLayout = remember(line.text, primaryTextStyle, contentWidthPx) {
                     textMeasurer.measure(
                         text = line.text,
@@ -671,10 +632,6 @@ private fun ButterSmoothLyricsCanvasList(
                     blurEnabled = blurEnabled,
                     density = density.density,
                     clock = clock,
-                    onPositioned = { topPx, heightPx ->
-                        lineTopsPx[index] = topPx
-                        lineHeightsPx[index] = heightPx
-                    },
                     onTap = {
                         userPausedAutoScroll = false
                         resumeAutoJob?.cancel()
@@ -682,11 +639,9 @@ private fun ButterSmoothLyricsCanvasList(
                     }
                 )
             }
-
-            Spacer(modifier = Modifier.height(140.dp))
         }
 
-        // Top & bottom subtle edge alpha fade for viewport polish
+        // Top subtle edge alpha fade for viewport polish
         Box(
             modifier = Modifier
                 .fillMaxWidth()
@@ -713,12 +668,14 @@ private fun ButterSmoothLyricsCanvasList(
                 onClick = {
                     resumeAutoJob?.cancel()
                     userPausedAutoScroll = false
-                    val idx = floor(clock.focusIndex.floatValue).toInt().coerceIn(0, lyrics.lastIndex)
-                    scope.launch {
-                        scrollAnim.animateTo(
-                            computeTargetScrollForLine(idx),
-                            animationSpec = spring(dampingRatio = 0.92f, stiffness = 240f)
-                        )
+                    if (lyrics.isNotEmpty()) {
+                        val idx = floor(clock.focusIndex.floatValue).toInt().coerceIn(0, lyrics.lastIndex)
+                        scope.launch {
+                            listState.animateScrollToItem(
+                                index = idx + 1,
+                                scrollOffset = -targetAnchorYPx
+                            )
+                        }
                     }
                 },
                 contentAlignment = Alignment.Center
@@ -764,7 +721,6 @@ private fun ButterSmoothLyricRow(
     blurEnabled: Boolean,
     density: Float,
     clock: LyricsPlaybackClock,
-    onPositioned: (topPx: Float, heightPx: Float) -> Unit,
     onTap: () -> Unit
 ) {
     val translation = remember(line.text, translationEnabled) {
@@ -779,18 +735,9 @@ private fun ButterSmoothLyricRow(
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .onGloballyPositioned { coords ->
-                onPositioned(coords.positionInParent().y, coords.size.height.toFloat())
-            }
             .graphicsLayer {
                 val focus = clock.focusIndex.floatValue
                 val dist = index.toFloat() - focus
-                val absDist = abs(dist)
-                if (absDist > 6.5f) {
-                    alpha = 0f
-                    renderEffect = null
-                    return@graphicsLayer
-                }
                 alpha = LyricsMotionMath.alphaForDistance(dist)
                 val sc = LyricsMotionMath.scaleForDistance(dist)
                 scaleX = sc
@@ -815,9 +762,6 @@ private fun ButterSmoothLyricRow(
                     compositingStrategy = CompositingStrategy.Offscreen
                 }
         ) {
-            val focus = clock.focusIndex.floatValue
-            if (abs(index.toFloat() - focus) > 6.5f) return@Canvas
-
             val posMs = clock.positionMs.longValue
             val fillFrac = LyricsMotionMath.computeLineFillProgress(line, nextLineTimeMs, posMs)
 

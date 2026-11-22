@@ -39,6 +39,30 @@
             android:stopWithTask="false"
             android:foregroundServiceType="mediaPlayback" />
 
+        <receiver
+            android:name=".widget.RezonaWidgetProvider"
+            android:exported="true"
+            android:label="Rezona Liquid Glass">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/rezona_widget_info" />
+        </receiver>
+
+        <receiver
+            android:name=".widget.RezonaCompactWidgetProvider"
+            android:exported="true"
+            android:label="Rezona Compact Glass">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/rezona_compact_widget_info" />
+        </receiver>
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"

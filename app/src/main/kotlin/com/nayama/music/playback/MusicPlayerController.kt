@@ -4,10 +4,12 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Bundle
 import android.util.Log
 import androidx.annotation.OptIn
 import androidx.media3.common.AudioAttributes
 import androidx.media3.common.C
+import androidx.media3.common.ForwardingPlayer
 import androidx.media3.common.MediaItem
 import androidx.media3.common.MediaMetadata
 import androidx.media3.common.PlaybackException
@@ -23,7 +25,13 @@ import androidx.media3.exoplayer.audio.DefaultAudioSink
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
 import androidx.media3.exoplayer.source.MergingMediaSource
 import androidx.media3.exoplayer.source.ProgressiveMediaSource
+import androidx.media3.session.CommandButton
 import androidx.media3.session.MediaSession
+import androidx.media3.session.SessionCommand
+import androidx.media3.session.SessionResult
+import com.google.common.util.concurrent.Futures
+import com.google.common.util.concurrent.ListenableFuture
+import com.nayama.music.R
 import com.nayama.music.MainActivity
 import com.nayama.music.backend.ResolvedVideoVariant
 import com.nayama.music.data.local.LibraryRepository
@@ -50,6 +58,8 @@ class MusicPlayerController private constructor(
     private val context: Context
 ) {
     companion object {
+        private const val CMD_TOGGLE_LIKE = "com.nayama.music.CMD_TOGGLE_LIKE"
+
         @Volatile
         private var instance: MusicPlayerController? = null
 
@@ -132,10 +142,78 @@ class MusicPlayerController private constructor(
                 PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
             )
 
-            mediaSession = MediaSession.Builder(context, player)
+            val sessionPlayer = object : ForwardingPlayer(player) {
+                override fun getAvailableCommands(): Player.Commands {
+                    return super.getAvailableCommands().buildUpon()
+                        .add(Player.COMMAND_SEEK_TO_NEXT)
+                        .add(Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM)
+                        .add(Player.COMMAND_SEEK_TO_PREVIOUS)
+                        .add(Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM)
+                        .build()
+                }
+
+                override fun isCommandAvailable(command: Int): Boolean {
+                    return when (command) {
+                        Player.COMMAND_SEEK_TO_NEXT,
+                        Player.COMMAND_SEEK_TO_NEXT_MEDIA_ITEM,
+                        Player.COMMAND_SEEK_TO_PREVIOUS,
+                        Player.COMMAND_SEEK_TO_PREVIOUS_MEDIA_ITEM -> true
+                        else -> super.isCommandAvailable(command)
+                    }
+                }
+
+                override fun seekToNext() {
+                    RezonaPlayerController.getExistingInstance()?.skipNext() ?: super.seekToNext()
+                }
+
+                override fun seekToNextMediaItem() {
+                    RezonaPlayerController.getExistingInstance()?.skipNext() ?: super.seekToNextMediaItem()
+                }
+
+                override fun seekToPrevious() {
+                    RezonaPlayerController.getExistingInstance()?.skipPrevious() ?: super.seekToPrevious()
+                }
+
+                override fun seekToPreviousMediaItem() {
+                    RezonaPlayerController.getExistingInstance()?.skipPrevious() ?: super.seekToPreviousMediaItem()
+                }
+            }
+
+            val sessionCallback = object : MediaSession.Callback {
+                override fun onConnect(
+                    session: MediaSession,
+                    controller: MediaSession.ControllerInfo
+                ): MediaSession.ConnectionResult {
+                    val sessionCommands = MediaSession.ConnectionResult.DEFAULT_SESSION_COMMANDS
+                        .buildUpon()
+                        .add(SessionCommand(CMD_TOGGLE_LIKE, Bundle.EMPTY))
+                        .build()
+                    return MediaSession.ConnectionResult.AcceptedResultBuilder(session)
+                        .setAvailableSessionCommands(sessionCommands)
+                        .build()
+                }
+
+                override fun onCustomCommand(
+                    session: MediaSession,
+                    controller: MediaSession.ControllerInfo,
+                    customCommand: SessionCommand,
+                    args: Bundle
+                ): ListenableFuture<SessionResult> {
+                    if (customCommand.customAction == CMD_TOGGLE_LIKE) {
+                        RezonaPlayerController.getExistingInstance()?.toggleLike()
+                        updateSessionCustomLayout()
+                        return Futures.immediateFuture(SessionResult(SessionResult.RESULT_SUCCESS))
+                    }
+                    return super.onCustomCommand(session, controller, customCommand, args)
+                }
+            }
+
+            mediaSession = MediaSession.Builder(context, sessionPlayer)
                 .setSessionActivity(sessionPendingIntent)
+                .setCallback(sessionCallback)
                 .setId("nayama_media_session")
                 .build()
+            updateSessionCustomLayout()
 
             try {
                 AudioEqualizerController.getInstance(context).attachToSession(player.audioSessionId)
@@ -234,6 +312,18 @@ class MusicPlayerController private constructor(
     }
 
     fun getMediaSession(): MediaSession? = mediaSession
+
+    fun updateSessionCustomLayout() {
+        val session = mediaSession ?: return
+        val liked = RezonaPlayerController.getExistingInstance()?.isLiked?.value ?: false
+        val likeBtn = CommandButton.Builder(
+            if (liked) CommandButton.ICON_HEART_FILLED else CommandButton.ICON_HEART_UNFILLED
+        )
+            .setDisplayName(if (liked) "Unlike" else "Love")
+            .setSessionCommand(SessionCommand(CMD_TOGGLE_LIKE, Bundle.EMPTY))
+            .build()
+        runCatching { session.setCustomLayout(listOf(likeBtn)) }
+    }
 
     fun stopAndClearForTaskRemoval() {
         resolveJob?.cancel()

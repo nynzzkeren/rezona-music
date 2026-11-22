@@ -382,7 +382,7 @@ class RezonaCloudSyncManager private constructor(private val appContext: Context
             artists = item.subtitle.take(300),
             album = "",
             durationMs = 0L,
-            thumbnailUrl = item.thumbnailUrl.take(1024),
+            thumbnailUrl = sanitizeHttpUrl(item.thumbnailUrl),
             addedAt = item.addedAt.coerceAtLeast(0L),
             updatedAt = item.updatedAt.coerceAtLeast(1L),
             deleted = item.deleted,
@@ -566,110 +566,60 @@ class RezonaCloudSyncManager private constructor(private val appContext: Context
             val root = userRoot(firestore, uid)
             val session = authManager.session.value
             val chunks = RezonaSyncLogic.chunkBatchOperations(pending, RezonaSyncLogic.FIRESTORE_SAFE_BATCH_SIZE)
+            var firstFailure: Pair<String, Throwable>? = null
 
             for (chunk in chunks) {
                 val batch = firestore.batch()
                 val includedKeys = mutableListOf<String>()
-
                 for (op in chunk) {
-                    when (op.entityType) {
-                        OP_PROFILE -> {
-                            val data = linkedMapOf<String, Any>(
-                                "displayName" to session.displayName.take(100),
-                                "email" to session.email.take(254),
-                                "provider" to session.providerLabel.take(40),
-                                "updatedAt" to System.currentTimeMillis().coerceAtLeast(1L)
-                            )
-                            batch.set(root, data)
-                            includedKeys.add(op.opKey)
-                        }
-                        OP_LIKE -> {
-                            val meta = json.decodeFromString<QueuedTrackMeta>(op.payloadJson)
-                            batch.set(root.collection("likes").document(meta.videoId), buildTrackPayload(meta))
-                            includedKeys.add(op.opKey)
-                        }
-                        OP_PLAYLIST -> {
-                            val pl = json.decodeFromString<QueuedPlaylistMeta>(op.payloadJson)
-                            val plRef = root.collection("playlists").document(pl.playlistId)
-                            val payload = linkedMapOf<String, Any>(
-                                "playlistId" to pl.playlistId,
-                                "name" to pl.name,
-                                "createdAt" to pl.createdAt.coerceAtLeast(0L),
-                                "updatedAt" to pl.updatedAt.coerceAtLeast(1L),
-                                "trackIds" to pl.trackIds,
-                                "deleted" to pl.deleted,
-                                "description" to pl.description
-                            )
-                            batch.set(plRef, payload)
-                            includedKeys.add(op.opKey)
-                        }
-                        OP_PLAYLIST_TRACK -> {
-                            val meta = json.decodeFromString<QueuedTrackMeta>(op.payloadJson)
-                            val ref = root.collection("playlists")
-                                .document(op.parentId)
-                                .collection("tracks")
-                                .document(meta.videoId)
-                            val map = buildTrackPayload(meta).toMutableMap()
-                            map["orderIndex"] = meta.extraIndex.coerceIn(0, 5000)
-                            batch.set(ref, map)
-                            includedKeys.add(op.opKey)
-                        }
-                        OP_LIBRARY_ITEM -> {
-                            val meta = json.decodeFromString<QueuedTrackMeta>(op.payloadJson)
-                            val map = linkedMapOf<String, Any>(
-                                "itemId" to meta.videoId.take(128),
-                                "itemType" to meta.itemType.ifBlank { "album" },
-                                "title" to meta.title,
-                                "subtitle" to meta.artists,
-                                "thumbnailUrl" to meta.thumbnailUrl,
-                                "addedAt" to meta.addedAt,
-                                "updatedAt" to meta.updatedAt,
-                                "deleted" to meta.deleted
-                            )
-                            batch.set(root.collection("libraryItems").document(meta.videoId), map)
-                            includedKeys.add(op.opKey)
-                        }
-                        OP_HISTORY -> {
-                            val meta = json.decodeFromString<QueuedTrackMeta>(op.payloadJson)
-                            val eid = meta.entryId.ifBlank { op.entityId }
-                            val map = linkedMapOf<String, Any>(
-                                "entryId" to eid,
-                                "videoId" to meta.videoId,
-                                "title" to meta.title,
-                                "artists" to meta.artists,
-                                "album" to meta.album,
-                                "durationMs" to meta.durationMs,
-                                "thumbnailUrl" to meta.thumbnailUrl,
-                                "playedAt" to meta.playedAt.coerceAtLeast(0L),
-                                "updatedAt" to meta.updatedAt.coerceAtLeast(1L),
-                                "deleted" to meta.deleted
-                            )
-                            batch.set(root.collection("history").document(eid), map)
-                            includedKeys.add(op.opKey)
-                        }
-                        OP_SETTINGS -> {
-                            val settingsMap = preferences.exportSettingsForCloudSync(op.updatedAt)
-                            batch.set(root.collection("settings").document("preferences"), settingsMap)
-                            includedKeys.add(op.opKey)
-                        }
-                        OP_PIN -> {
-                            val meta = json.decodeFromString<QueuedTrackMeta>(op.payloadJson)
-                            val map = buildTrackPayload(meta).toMutableMap()
-                            map["pinOrder"] = meta.extraIndex.coerceIn(0, 100)
-                            batch.set(root.collection("pins").document(meta.videoId), map)
-                            includedKeys.add(op.opKey)
-                        }
+                    if (applyOperationToBatch(batch, root, session, op)) {
+                        includedKeys.add(op.opKey)
                     }
                 }
 
                 if (includedKeys.isNotEmpty()) {
-                    batch.commit().await()
-                    db.syncDao().deleteByKeys(includedKeys)
+                    try {
+                        batch.commit().await()
+                        db.syncDao().deleteByKeys(includedKeys)
+                    } catch (batchErr: Throwable) {
+                        // Fall back to per-item commits so one rejected doc never blocks valid queued ops
+                        for (op in chunk) {
+                            val singleBatch = firestore.batch()
+                            if (!applyOperationToBatch(singleBatch, root, session, op)) continue
+                            try {
+                                singleBatch.commit().await()
+                                db.syncDao().deleteByKeys(listOf(op.opKey))
+                            } catch (itemErr: Throwable) {
+                                // Special recovery: playlist update rejected because remote createdAt differs
+                                val recovered = if (op.entityType == OP_PLAYLIST) {
+                                    recoverPlaylistCreatedAtAndCommit(root, op)
+                                } else {
+                                    false
+                                }
+                                if (recovered) {
+                                    db.syncDao().deleteByKeys(listOf(op.opKey))
+                                } else {
+                                    db.syncDao().markRetryError(
+                                        listOf(op.opKey),
+                                        itemErr.localizedMessage ?: itemErr.javaClass.simpleName
+                                    )
+                                    if (firstFailure == null) {
+                                        firstFailure = "${op.entityType}:${op.entityId}" to itemErr
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
 
-            preferences.recordSyncPushSuccess()
-            true
+            if (firstFailure != null) {
+                recordVisibleSyncError("Push failed (${firstFailure.first})", firstFailure.second)
+                false
+            } else {
+                preferences.recordSyncPushSuccess()
+                true
+            }
         } catch (e: Throwable) {
             recordVisibleSyncError("Push failed", e)
             val keys = pending.map { it.opKey }
@@ -682,15 +632,167 @@ class RezonaCloudSyncManager private constructor(private val appContext: Context
         }
     }
 
-    private fun buildTrackPayload(meta: QueuedTrackMeta): LinkedHashMap<String, Any> = linkedMapOf(
-        "videoId" to meta.videoId,
-        "title" to meta.title,
-        "artists" to meta.artists,
-        "album" to meta.album,
-        "durationMs" to meta.durationMs,
-        "thumbnailUrl" to meta.thumbnailUrl,
-        "addedAt" to meta.addedAt,
-        "updatedAt" to meta.updatedAt,
+    private suspend fun applyOperationToBatch(
+        batch: com.google.firebase.firestore.WriteBatch,
+        root: DocumentReference,
+        session: com.nayama.music.auth.AuthSessionState,
+        op: SyncOperationEntity
+    ): Boolean {
+        when (op.entityType) {
+            OP_PROFILE -> {
+                val safeEmail = session.email.trim().take(254).let {
+                    if (it.isEmpty() || RezonaSyncLogic.isValidEmailFormat(it)) it else ""
+                }
+                val data = linkedMapOf<String, Any>(
+                    "displayName" to session.displayName.take(100),
+                    "email" to safeEmail,
+                    "provider" to session.providerLabel.take(40),
+                    "updatedAt" to System.currentTimeMillis().coerceAtLeast(1L)
+                )
+                batch.set(root, data)
+                return true
+            }
+            OP_LIKE -> {
+                val meta = json.decodeFromString<QueuedTrackMeta>(op.payloadJson)
+                val vid = meta.videoId.ifBlank { op.entityId }.take(64)
+                batch.set(root.collection("likes").document(vid), buildTrackPayload(meta, vid))
+                return true
+            }
+            OP_PLAYLIST -> {
+                val pl = json.decodeFromString<QueuedPlaylistMeta>(op.payloadJson)
+                val pid = pl.playlistId.ifBlank { op.entityId }.take(64)
+                val safeTrackIds = pl.trackIds
+                    .map { it.trim().take(64) }
+                    .filter { it.isNotEmpty() }
+                    .take(2000)
+                val plRef = root.collection("playlists").document(pid)
+                val payload = linkedMapOf<String, Any>(
+                    "playlistId" to pid,
+                    "name" to pl.name.ifBlank { "Untitled Playlist" }.take(200),
+                    "createdAt" to pl.createdAt.coerceAtLeast(0L),
+                    "updatedAt" to pl.updatedAt.coerceAtLeast(1L),
+                    "trackIds" to safeTrackIds,
+                    "deleted" to pl.deleted,
+                    "description" to pl.description.take(500)
+                )
+                batch.set(plRef, payload)
+                return true
+            }
+            OP_PLAYLIST_TRACK -> {
+                val meta = json.decodeFromString<QueuedTrackMeta>(op.payloadJson)
+                val vid = meta.videoId.ifBlank { op.entityId }.take(64)
+                val ref = root.collection("playlists")
+                    .document(op.parentId.take(64))
+                    .collection("tracks")
+                    .document(vid)
+                val map = buildTrackPayload(meta, vid).toMutableMap()
+                map["orderIndex"] = meta.extraIndex.coerceIn(0, 5000)
+                batch.set(ref, map)
+                return true
+            }
+            OP_LIBRARY_ITEM -> {
+                val meta = json.decodeFromString<QueuedTrackMeta>(op.payloadJson)
+                val itemId = meta.videoId.ifBlank { op.entityId }.take(128)
+                val validType = meta.itemType.lowercase().let {
+                    if (it in setOf("album", "artist", "playlist", "song")) it else "album"
+                }
+                val map = linkedMapOf<String, Any>(
+                    "itemId" to itemId,
+                    "itemType" to validType,
+                    "title" to meta.title.ifBlank { "Saved Item" }.take(300),
+                    "subtitle" to meta.artists.take(300),
+                    "thumbnailUrl" to sanitizeHttpUrl(meta.thumbnailUrl),
+                    "addedAt" to meta.addedAt.coerceAtLeast(0L),
+                    "updatedAt" to meta.updatedAt.coerceAtLeast(1L),
+                    "deleted" to meta.deleted
+                )
+                batch.set(root.collection("libraryItems").document(itemId), map)
+                return true
+            }
+            OP_HISTORY -> {
+                val meta = json.decodeFromString<QueuedTrackMeta>(op.payloadJson)
+                val eid = meta.entryId.ifBlank { op.entityId }.take(128)
+                val vid = meta.videoId.ifBlank { "unknown" }.take(64)
+                val map = linkedMapOf<String, Any>(
+                    "entryId" to eid,
+                    "videoId" to vid,
+                    "title" to meta.title.ifBlank { "Untitled Track" }.take(300),
+                    "artists" to meta.artists.take(300),
+                    "album" to meta.album.take(300),
+                    "durationMs" to meta.durationMs.coerceIn(0L, 86_400_000L),
+                    "thumbnailUrl" to RezonaSyncLogic.resolveThumbnailUrl(vid, meta.thumbnailUrl),
+                    "playedAt" to meta.playedAt.coerceAtLeast(0L),
+                    "updatedAt" to meta.updatedAt.coerceAtLeast(1L),
+                    "deleted" to meta.deleted
+                )
+                batch.set(root.collection("history").document(eid), map)
+                return true
+            }
+            OP_SETTINGS -> {
+                val settingsMap = preferences.exportSettingsForCloudSync(op.updatedAt)
+                batch.set(root.collection("settings").document("preferences"), settingsMap)
+                return true
+            }
+            OP_PIN -> {
+                val meta = json.decodeFromString<QueuedTrackMeta>(op.payloadJson)
+                val vid = meta.videoId.ifBlank { op.entityId }.take(64)
+                val map = buildTrackPayload(meta, vid).toMutableMap()
+                map["pinOrder"] = meta.extraIndex.coerceIn(0, 100)
+                batch.set(root.collection("pins").document(vid), map)
+                return true
+            }
+            else -> return false
+        }
+    }
+
+    private suspend fun recoverPlaylistCreatedAtAndCommit(
+        root: DocumentReference,
+        op: SyncOperationEntity
+    ): Boolean = runCatching {
+        val pl = json.decodeFromString<QueuedPlaylistMeta>(op.payloadJson)
+        val pid = pl.playlistId.ifBlank { op.entityId }.take(64)
+        val plRef = root.collection("playlists").document(pid)
+        val remoteSnap = plRef.get().await()
+        if (!remoteSnap.exists()) return@runCatching false
+        val serverCreatedAt = remoteSnap.getLong("createdAt") ?: return@runCatching false
+        val safeTrackIds = pl.trackIds
+            .map { it.trim().take(64) }
+            .filter { it.isNotEmpty() }
+            .take(2000)
+        val payload = linkedMapOf<String, Any>(
+            "playlistId" to pid,
+            "name" to pl.name.ifBlank { "Untitled Playlist" }.take(200),
+            "createdAt" to serverCreatedAt.coerceAtLeast(0L),
+            "updatedAt" to pl.updatedAt.coerceAtLeast(1L),
+            "trackIds" to safeTrackIds,
+            "deleted" to pl.deleted,
+            "description" to pl.description.take(500)
+        )
+        plRef.set(payload).await()
+        true
+    }.getOrDefault(false)
+
+    private fun sanitizeHttpUrl(raw: String): String {
+        val clean = raw.trim()
+        return if (clean.startsWith("https://") || clean.startsWith("http://")) {
+            clean.take(1024)
+        } else {
+            ""
+        }
+    }
+
+    private fun buildTrackPayload(
+        meta: QueuedTrackMeta,
+        safeVideoId: String = meta.videoId.take(64)
+    ): LinkedHashMap<String, Any> = linkedMapOf(
+        "videoId" to safeVideoId,
+        "title" to meta.title.ifBlank { "Untitled Track" }.take(300),
+        "artists" to meta.artists.take(300),
+        "album" to meta.album.take(300),
+        "durationMs" to meta.durationMs.coerceIn(0L, 86_400_000L),
+        "thumbnailUrl" to RezonaSyncLogic.resolveThumbnailUrl(safeVideoId, meta.thumbnailUrl),
+        "addedAt" to meta.addedAt.coerceAtLeast(0L),
+        "updatedAt" to meta.updatedAt.coerceAtLeast(1L),
         "deleted" to meta.deleted
     )
 
@@ -1058,15 +1160,20 @@ class RezonaCloudSyncManager private constructor(private val appContext: Context
         }
     }
 
-    private suspend fun recordVisibleSyncError(prefix: String, error: Throwable) {
+    private suspend fun recordVisibleSyncError(
+        prefix: String,
+        error: Throwable,
+        showToast: Boolean = false
+    ) {
         val detail = "$prefix: ${error.javaClass.simpleName} — ${error.localizedMessage ?: "Unknown error"}"
         Log.e(TAG, detail, error)
         preferences.recordSyncError(detail)
+        if (!showToast) return
         val now = System.currentTimeMillis()
         if (now - lastToastMs > 6000L) {
             lastToastMs = now
             mainHandler.post {
-                Toast.makeText(appContext, "Sync issue: ${error.localizedMessage ?: prefix}", Toast.LENGTH_SHORT).show()
+                Toast.makeText(appContext, "$prefix: ${error.localizedMessage ?: error.javaClass.simpleName}", Toast.LENGTH_SHORT).show()
             }
         }
     }

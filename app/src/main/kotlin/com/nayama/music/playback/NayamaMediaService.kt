@@ -51,30 +51,56 @@ class NayamaMediaService : Service() {
                 return START_NOT_STICKY
             }
             ACTION_PLAY -> {
-                MusicPlayerController.getInstance(this).resume()
+                RezonaPlayerController.getExistingInstance()?.let {
+                    if (!it.isPlaying.value) it.togglePlayPause()
+                } ?: MusicPlayerController.getInstance(this).resume()
+                com.nayama.music.widget.RezonaWidgetUpdater.updateAll(this)
                 return START_NOT_STICKY
             }
             ACTION_PAUSE -> {
-                MusicPlayerController.getInstance(this).pause()
+                RezonaPlayerController.getExistingInstance()?.let {
+                    if (it.isPlaying.value) it.togglePlayPause()
+                } ?: MusicPlayerController.getInstance(this).pause()
+                com.nayama.music.widget.RezonaWidgetUpdater.updateAll(this)
                 return START_NOT_STICKY
             }
             ACTION_NEXT -> {
-                MusicPlayerController.getInstance(this).skipToNext()
+                RezonaPlayerController.getExistingInstance()?.skipNext()
+                    ?: MusicPlayerController.getInstance(this).skipToNext()
+                com.nayama.music.widget.RezonaWidgetUpdater.updateAll(this)
                 return START_NOT_STICKY
             }
             ACTION_PREV -> {
-                MusicPlayerController.getInstance(this).skipToPrevious()
+                RezonaPlayerController.getExistingInstance()?.skipPrevious()
+                    ?: MusicPlayerController.getInstance(this).skipToPrevious()
+                com.nayama.music.widget.RezonaWidgetUpdater.updateAll(this)
+                return START_NOT_STICKY
+            }
+            ACTION_TOGGLE_LIKE -> {
+                val rc = RezonaPlayerController.getExistingInstance()
+                rc?.toggleLike()
+                val t = rc?.currentTrack?.value
+                if (t != null) {
+                    val likedNow = rc.isLiked.value
+                    val art = if (t.coverArtUrl == cachedArtworkUrl) cachedArtworkBitmap else null
+                    val updated = buildMediaNotification(t.title, t.artist, rc.isPlaying.value, likedNow, art)
+                    val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
+                    nm?.notify(NayamaApplication.NOTIFICATION_ID, updated)
+                }
+                com.nayama.music.widget.RezonaWidgetUpdater.updateAll(this)
                 return START_NOT_STICKY
             }
         }
 
-        val trackTitle = intent?.getStringExtra(EXTRA_TRACK_TITLE) ?: "Rezona"
-        val trackArtist = intent?.getStringExtra(EXTRA_TRACK_ARTIST) ?: "Streaming"
-        val artworkUrl = intent?.getStringExtra(EXTRA_ARTWORK_URL)
-        val isPlaying = intent?.getBooleanExtra(EXTRA_IS_PLAYING, true) ?: true
+        val controller = RezonaPlayerController.getExistingInstance()
+        val trackTitle = intent?.getStringExtra(EXTRA_TRACK_TITLE) ?: controller?.currentTrack?.value?.title ?: "Rezona"
+        val trackArtist = intent?.getStringExtra(EXTRA_TRACK_ARTIST) ?: controller?.currentTrack?.value?.artist ?: "Streaming"
+        val artworkUrl = intent?.getStringExtra(EXTRA_ARTWORK_URL) ?: controller?.currentTrack?.value?.coverArtUrl
+        val isPlaying = intent?.getBooleanExtra(EXTRA_IS_PLAYING, controller?.isPlaying?.value ?: true) ?: true
+        val isLiked = intent?.getBooleanExtra(EXTRA_IS_LIKED, controller?.isLiked?.value ?: false) ?: false
 
         val initialArt = if (!artworkUrl.isNullOrBlank() && artworkUrl == cachedArtworkUrl) cachedArtworkBitmap else null
-        val notification = buildMediaNotification(trackTitle, trackArtist, isPlaying, initialArt)
+        val notification = buildMediaNotification(trackTitle, trackArtist, isPlaying, isLiked, initialArt)
 
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
@@ -89,6 +115,8 @@ class NayamaMediaService : Service() {
         } catch (_: Exception) {
         }
 
+        com.nayama.music.widget.RezonaWidgetUpdater.updateAll(this)
+
         if (!artworkUrl.isNullOrBlank() && artworkUrl != cachedArtworkUrl) {
             artworkFetchJob?.cancel()
             artworkFetchJob = serviceScope.launch {
@@ -96,7 +124,8 @@ class NayamaMediaService : Service() {
                 if (bmp != null) {
                     cachedArtworkUrl = artworkUrl
                     cachedArtworkBitmap = bmp
-                    val updated = buildMediaNotification(trackTitle, trackArtist, isPlaying, bmp)
+                    val currentLiked = RezonaPlayerController.getExistingInstance()?.isLiked?.value ?: isLiked
+                    val updated = buildMediaNotification(trackTitle, trackArtist, isPlaying, currentLiked, bmp)
                     val nm = getSystemService(Context.NOTIFICATION_SERVICE) as? NotificationManager
                     nm?.notify(NayamaApplication.NOTIFICATION_ID, updated)
                 }
@@ -138,6 +167,7 @@ class NayamaMediaService : Service() {
         title: String,
         artist: String,
         isPlaying: Boolean,
+        isLiked: Boolean,
         artworkBitmap: Bitmap?
     ): Notification {
         val openAppIntent = Intent(this, MainActivity::class.java).apply {
@@ -170,6 +200,12 @@ class NayamaMediaService : Service() {
             Intent(this, NayamaMediaService::class.java).apply { action = ACTION_NEXT },
             PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
         )
+        val likePendingIntent = PendingIntent.getService(
+            this,
+            4,
+            Intent(this, NayamaMediaService::class.java).apply { action = ACTION_TOGGLE_LIKE },
+            PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+        )
 
         val mediaSession = MusicPlayerController.getInstance(applicationContext).getMediaSession()
 
@@ -185,6 +221,11 @@ class NayamaMediaService : Service() {
                 playPausePendingIntent
             )
             .addAction(R.drawable.ic_skip_next, "Next", nextPendingIntent)
+            .addAction(
+                if (isLiked) R.drawable.ic_heart_filled else R.drawable.ic_heart_outline,
+                if (isLiked) "Unlike" else "Love",
+                likePendingIntent
+            )
             .setOngoing(isPlaying)
             .setSilent(true)
             .setVisibility(NotificationCompat.VISIBILITY_PUBLIC)
@@ -194,7 +235,10 @@ class NayamaMediaService : Service() {
         }
 
         if (mediaSession != null) {
-            builder.setStyle(MediaStyleNotificationHelper.MediaStyle(mediaSession))
+            builder.setStyle(
+                MediaStyleNotificationHelper.MediaStyle(mediaSession)
+                    .setShowActionsInCompactView(0, 1, 2)
+            )
         }
 
         return builder.build()
@@ -217,17 +261,20 @@ class NayamaMediaService : Service() {
         const val ACTION_PAUSE = "com.nayama.music.ACTION_PAUSE"
         const val ACTION_NEXT = "com.nayama.music.ACTION_NEXT"
         const val ACTION_PREV = "com.nayama.music.ACTION_PREV"
+        const val ACTION_TOGGLE_LIKE = "com.nayama.music.ACTION_TOGGLE_LIKE"
         const val EXTRA_TRACK_TITLE = "extra_title"
         const val EXTRA_TRACK_ARTIST = "extra_artist"
         const val EXTRA_ARTWORK_URL = "extra_artwork_url"
         const val EXTRA_IS_PLAYING = "extra_is_playing"
+        const val EXTRA_IS_LIKED = "extra_is_liked"
 
         fun start(
             context: Context,
             title: String,
             artist: String,
             artworkUrl: String? = null,
-            isPlaying: Boolean = true
+            isPlaying: Boolean = true,
+            isLiked: Boolean = RezonaPlayerController.getExistingInstance()?.isLiked?.value ?: false
         ) {
             val intent = Intent(context, NayamaMediaService::class.java).apply {
                 action = ACTION_START
@@ -235,6 +282,7 @@ class NayamaMediaService : Service() {
                 putExtra(EXTRA_TRACK_ARTIST, artist)
                 putExtra(EXTRA_ARTWORK_URL, artworkUrl.orEmpty())
                 putExtra(EXTRA_IS_PLAYING, isPlaying)
+                putExtra(EXTRA_IS_LIKED, isLiked)
             }
             try {
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
