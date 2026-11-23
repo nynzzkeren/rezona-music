@@ -781,6 +781,38 @@
             min-width: 90px;
             justify-content: center;
         }
+
+        .ad-slot-shell {
+            position: relative;
+            z-index: 1;
+            width: 100%;
+            max-width: 440px;
+            margin-top: 16px;
+            padding: 14px 16px;
+            border-radius: 22px;
+            background: rgba(255, 255, 255, 0.04);
+            backdrop-filter: blur(22px);
+            -webkit-backdrop-filter: blur(22px);
+            border: 1px solid rgba(255, 255, 255, 0.14);
+            text-align: center;
+        }
+
+        .ad-slot-label {
+            font-size: 10px;
+            letter-spacing: 0.12em;
+            text-transform: uppercase;
+            color: var(--muted);
+            margin-bottom: 8px;
+        }
+
+        .ad-slot-body {
+            min-height: 60px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 12px;
+            color: var(--soft-silver);
+        }
     </style>
 </head>
 <body>
@@ -856,8 +888,79 @@
             <button type="button" class="copy-btn" id="copyShareBtn">Copy Link</button>
         </div>
 
-        <p class="footer-note">Android 8.0+ · Signed Release APK</p>
+        <p class="footer-note">Android 8.0+ · Signed Release APK · 100% Ad-Free App</p>
     </main>
+
+    <!-- Web-Only Sponsorship / Ad Slot (Android APK stays 100% ad-free) -->
+    <aside class="ad-slot-shell" id="rezonaWebAdSlot" aria-label="Sponsored">
+        <div class="ad-slot-label">Sponsored · Keeps Rezona App 100% Ad-Free</div>
+        <div class="ad-slot-body" id="rezonaWebAdBody">
+            <span>Ad slot ready (configure in <code>/ads-config.js</code>)</span>
+        </div>
+    </aside>
+
+    <script src="/ads-config.js"></script>
+    <script>
+        (function initRezonaWebAds() {
+            const cfg = window.REZONA_ADS_CONFIG || {};
+            const bodyEl = document.getElementById('rezonaWebAdBody');
+            const slotEl = document.getElementById('rezonaWebAdSlot');
+            if (!bodyEl || !slotEl) return;
+
+            let mounted = false;
+
+            // 1. Google AdSense
+            if (cfg.adsenseClient && cfg.adsenseSlot) {
+                mounted = true;
+                bodyEl.innerHTML = '';
+                const s = document.createElement('script');
+                s.async = true;
+                s.src = 'https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=' + encodeURIComponent(cfg.adsenseClient);
+                s.crossOrigin = 'anonymous';
+                document.head.appendChild(s);
+
+                const ins = document.createElement('ins');
+                ins.className = 'adsbygoogle';
+                ins.style.display = 'block';
+                ins.style.width = '100%';
+                ins.setAttribute('data-ad-client', cfg.adsenseClient);
+                ins.setAttribute('data-ad-slot', cfg.adsenseSlot);
+                ins.setAttribute('data-ad-format', 'auto');
+                ins.setAttribute('data-full-width-responsive', 'true');
+                bodyEl.appendChild(ins);
+                try { (window.adsbygoogle = window.adsbygoogle || []).push({}); } catch (_) {}
+            }
+
+            // 2. Adsterra / Monetag Banner / Native Banner
+            if (!mounted && cfg.bannerScriptUrl) {
+                mounted = true;
+                bodyEl.innerHTML = '';
+                if (cfg.bannerContainerId) {
+                    const div = document.createElement('div');
+                    div.id = cfg.bannerContainerId;
+                    bodyEl.appendChild(div);
+                }
+                const s = document.createElement('script');
+                s.async = true;
+                s.dataset.cfasync = 'false';
+                s.src = cfg.bannerScriptUrl;
+                bodyEl.appendChild(s);
+            }
+
+            // 3. Optional Social Bar / Vignette Script
+            if (cfg.socialBarScriptUrl) {
+                const s = document.createElement('script');
+                s.async = true;
+                s.src = cfg.socialBarScriptUrl;
+                document.body.appendChild(s);
+            }
+
+            // Hide placeholder cleanly for visitors until publisher ID is configured
+            if (!mounted) {
+                slotEl.style.display = 'none';
+            }
+        })();
+    </script>
 
     <dialog id="supportDialog" class="support-dialog" closedby="any" aria-labelledby="supportDialogTitle">
         <div class="dialog-body">
