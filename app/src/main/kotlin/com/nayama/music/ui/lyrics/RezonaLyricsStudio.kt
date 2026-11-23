@@ -530,6 +530,15 @@ private fun ButterSmoothLyricsCanvasList(
     val isUserDragging by listState.interactionSource.collectIsDraggedAsState()
     var userPausedAutoScroll by remember(trackId) { mutableStateOf(false) }
     var resumeAutoJob by remember { mutableStateOf<Job?>(null) }
+    var translatedLines by remember(trackId, lyrics) { mutableStateOf<Map<String, String>>(emptyMap()) }
+
+    LaunchedEffect(trackId, lyrics, translationEnabled) {
+        if (!translationEnabled || lyrics.isEmpty()) {
+            translatedLines = emptyMap()
+            return@LaunchedEffect
+        }
+        translatedLines = LyricLanguageHelper.translateLyricsBatch(lyrics.map { it.text })
+    }
 
     val targetAnchorYPx = (viewportHeightPx * 0.28f).toInt().coerceAtLeast(0)
 
@@ -627,7 +636,7 @@ private fun ButterSmoothLyricsCanvasList(
                     cachedLayout = cachedLayout,
                     lyricsStyle = lyricsStyle,
                     fontFamily = fontFamily,
-                    translationEnabled = translationEnabled,
+                    translatedText = if (translationEnabled) translatedLines[line.text.trim()] else null,
                     romanizationEnabled = romanizationEnabled,
                     blurEnabled = blurEnabled,
                     density = density.density,
@@ -716,15 +725,15 @@ private fun ButterSmoothLyricRow(
     cachedLayout: TextLayoutResult,
     lyricsStyle: LyricsStyleConfig,
     fontFamily: androidx.compose.ui.text.font.FontFamily,
-    translationEnabled: Boolean,
+    translatedText: String?,
     romanizationEnabled: Boolean,
     blurEnabled: Boolean,
     density: Float,
     clock: LyricsPlaybackClock,
     onTap: () -> Unit
 ) {
-    val translation = remember(line.text, translationEnabled) {
-        if (translationEnabled) LyricLanguageHelper.translateToDeviceLanguage(line.text) else null
+    val translation = translatedText ?: remember(line.text) {
+        LyricLanguageHelper.translateToDeviceLanguage(line.text)
     }
     val romanization = remember(line.text, romanizationEnabled) {
         if (romanizationEnabled) LyricLanguageHelper.romanize(line.text) else null

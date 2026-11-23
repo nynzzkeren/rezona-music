@@ -5,7 +5,13 @@ import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.util.Log
+import androidx.lifecycle.lifecycleScope
+import com.nayama.music.data.preferences.RezonaPreferences
+import com.nayama.music.overlay.RezonaDynamicIslandService
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.launch
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
@@ -108,6 +114,28 @@ class MainActivity : ComponentActivity() {
                 }
             }
         }
+    }
+
+    override fun onStart() {
+        super.onStart()
+        RezonaDynamicIslandService.setAppInForeground(true)
+    }
+
+    override fun onResume() {
+        super.onResume()
+        lifecycleScope.launch {
+            val enabled = RezonaPreferences(applicationContext).dynamicIslandEnabledFlow.first()
+            if (enabled && Settings.canDrawOverlays(this@MainActivity)) {
+                RezonaDynamicIslandService.start(applicationContext)
+            } else if (!enabled) {
+                RezonaDynamicIslandService.stop(applicationContext)
+            }
+        }
+    }
+
+    override fun onStop() {
+        super.onStop()
+        RezonaDynamicIslandService.setAppInForeground(false)
     }
 }
 

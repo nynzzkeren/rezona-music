@@ -76,6 +76,7 @@ fun RezonaSettingsScreen(
     val glassIntensity by preferences.glassIntensityFlow.collectAsState(initial = "Low")
     val vividAmbient by preferences.ambientVividPlayerFlow.collectAsState(initial = true)
     val dockFoldOnScroll by preferences.dockFoldOnScrollFlow.collectAsState(initial = true)
+    val dynamicIslandEnabled by preferences.dynamicIslandEnabledFlow.collectAsState(initial = false)
     val cacheLimitMb by preferences.cacheLimitMbFlow.collectAsState(initial = 1024)
     val imageCacheLimitMb by preferences.imageCacheLimitMbFlow.collectAsState(initial = 256)
     val translationEnabled by preferences.lyricsTranslationEnabledFlow.collectAsState(initial = true)
@@ -283,6 +284,41 @@ fun RezonaSettingsScreen(
                         subtitle = "Shrink bottom tabs into a round icon alongside Mini Player",
                         checked = dockFoldOnScroll,
                         onCheckedChange = { coroutineScope.launch { preferences.setDockFoldOnScroll(it) } }
+                    )
+                    val hasOverlayPerm = remember(dynamicIslandEnabled) {
+                        android.provider.Settings.canDrawOverlays(context)
+                    }
+                    SettingsToggleRow(
+                        title = "Dynamic Island Overlay",
+                        subtitle = when {
+                            dynamicIslandEnabled && hasOverlayPerm -> "Active · Floating Liquid Glass capsule + live lyrics outside app"
+                            dynamicIslandEnabled && !hasOverlayPerm -> "Needs 'Display over other apps' permission — tap to grant"
+                            else -> "Show floating Liquid Glass capsule + live lyrics around camera cutout"
+                        },
+                        checked = dynamicIslandEnabled && hasOverlayPerm,
+                        onCheckedChange = { enabled ->
+                            coroutineScope.launch {
+                                preferences.setDynamicIslandEnabled(enabled)
+                                if (enabled) {
+                                    if (android.provider.Settings.canDrawOverlays(context)) {
+                                        com.nayama.music.overlay.RezonaDynamicIslandService.start(context)
+                                    } else {
+                                        android.widget.Toast.makeText(
+                                            context,
+                                            "Allow 'Display over other apps' for Dynamic Island",
+                                            android.widget.Toast.LENGTH_LONG
+                                        ).show()
+                                        val intent = android.content.Intent(
+                                            android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
+                                            android.net.Uri.parse("package:${context.packageName}")
+                                        )
+                                        context.startActivity(intent)
+                                    }
+                                } else {
+                                    com.nayama.music.overlay.RezonaDynamicIslandService.stop(context)
+                                }
+                            }
+                        }
                     )
                     RezonaHairlineDivider()
                 }

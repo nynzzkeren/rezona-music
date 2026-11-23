@@ -1,13 +1,39 @@
 package com.nayama.music.backend
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import org.json.JSONArray
+import java.net.URLEncoder
 import java.util.Locale
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.TimeUnit
 
 /**
- * Lightweight on-device Romanization & lyric line translation helper.
- * Performs fast deterministic transliteration for non-Latin scripts (Hangul/Hiragana/Katakana/Cyrillic)
- * and common multilingual phrase glosses matching the device language with zero external network calls.
+ * On-device Romanization + real cached lyric translation helper.
+ * - Romanization: deterministic Hangul / Hiragana / Katakana / Cyrillic transliteration.
+ * - Translation: batch-translates lyric lines to the device language via Google Translate
+ *   GTX endpoint with in-memory caching so every song translates smoothly and fast.
  */
 object LyricLanguageHelper {
+
+    private val httpClient = OkHttpClient.Builder()
+        .connectTimeout(5, TimeUnit.SECONDS)
+        .readTimeout(8, TimeUnit.SECONDS)
+        .build()
+
+    // Key: "$lang::$originalLine" -> translated line
+    private val translationCache = ConcurrentHashMap<String, String>()
+
+    fun normalizedDeviceLang(): String {
+        val raw = Locale.getDefault().language.lowercase(Locale.ENGLISH)
+        return when (raw) {
+            "in" -> "id"
+            "" -> "en"
+            else -> raw
+        }
+    }
 
     fun romanize(text: String): String? {
         if (text.isBlank()) return null
@@ -42,17 +68,106 @@ object LyricLanguageHelper {
         return if (converted) sb.toString().trim() else null
     }
 
-    fun translateToDeviceLanguage(text: String, targetLang: String = Locale.getDefault().language): String? {
-        if (text.isBlank()) return null
-        val lower = text.trim().lowercase()
-        val lang = targetLang.lowercase()
-        // Check exact phrase glosses for common Tagalog/Indonesian/Spanish/Japanese/English lines
-        val dict = when (lang) {
-            "id", "in" -> COMMON_GLOSS_ID
-            else -> COMMON_GLOSS_EN
+    /**
+     * Synchronous lookup from cache (plus instant local gloss fallback).
+     */
+    fun translateToDeviceLanguage(text: String, targetLang: String = normalizedDeviceLang()): String? {
+        val clean = text.trim()
+        if (clean.isBlank()) return null
+        val lang = if (targetLang.equals("in", ignoreCase = true)) "id" else targetLang.lowercase(Locale.ENGLISH)
+        translationCache["$lang::$clean"]?.let { cached ->
+            return cached.takeIf { !it.equals(clean, ignoreCase = true) }
         }
-        dict.entries.firstOrNull { (k, _) -> lower.contains(k) }?.let { return it.value }
         return null
+    }
+
+    /**
+     * Batch-translates all unique lyric lines into [targetLang] in chunks so a full song
+     * completes in 1-2 lightweight network calls and caches results for instant rendering.
+     */
+    suspend fun translateLyricsBatch(
+        lines: List<String>,
+        targetLang: String = normalizedDeviceLang()
+    ): Map<String, String> = withContext(Dispatchers.IO) {
+        val lang = if (targetLang.equals("in", ignoreCase = true)) "id" else targetLang.lowercase(Locale.ENGLISH)
+        val result = LinkedHashMap<String, String>()
+        val missing = mutableListOf<String>()
+
+        for (raw in lines) {
+            val clean = raw.trim()
+            if (clean.isBlank()) continue
+            val cached = translationCache["$lang::$clean"]
+            if (cached != null) {
+                if (!cached.equals(clean, ignoreCase = true)) {
+                    result[clean] = cached
+                }
+            } else if (clean !in missing) {
+                missing.add(clean)
+            }
+        }
+
+        if (missing.isEmpty()) return@withContext result
+
+        // Chunk by ~16 lines per request to keep URL length well within safe limits
+        val chunks = missing.chunked(16)
+        for (chunk in chunks) {
+            val joined = chunk.joinToString("\n")
+            val translatedJoined = fetchTranslation(joined, lang) ?: continue
+            val translatedLines = translatedJoined.split("\n")
+            if (translatedLines.size == chunk.size) {
+                for (i in chunk.indices) {
+                    val src = chunk[i]
+                    val dst = translatedLines[i].trim()
+                    if (dst.isNotBlank()) {
+                        translationCache["$lang::$src"] = dst
+                        if (!dst.equals(src, ignoreCase = true)) {
+                            result[src] = dst
+                        }
+                    }
+                }
+            } else {
+                // Fallback per-line when line count differs
+                for (src in chunk) {
+                    val dst = fetchTranslation(src, lang)?.trim().orEmpty()
+                    if (dst.isNotBlank()) {
+                        translationCache["$lang::$src"] = dst
+                        if (!dst.equals(src, ignoreCase = true)) {
+                            result[src] = dst
+                        }
+                    }
+                }
+            }
+        }
+        result
+    }
+
+    internal fun parseGtxTranslationJson(rawJson: String): String? {
+        val root = runCatching { JSONArray(rawJson) }.getOrNull() ?: return null
+        val sentences = root.optJSONArray(0) ?: return null
+        val sb = StringBuilder()
+        for (i in 0 until sentences.length()) {
+            val pair = sentences.optJSONArray(i) ?: continue
+            val piece = pair.optString(0, "")
+            if (piece.isNotEmpty()) sb.append(piece)
+        }
+        return sb.toString().trim().takeIf { it.isNotEmpty() }
+    }
+
+    private fun fetchTranslation(text: String, targetLang: String): String? {
+        return runCatching {
+            val encoded = URLEncoder.encode(text, "UTF-8")
+            val url = "https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&tl=$targetLang&dt=t&q=$encoded"
+            val req = Request.Builder()
+                .url(url)
+                .header("User-Agent", "Mozilla/5.0")
+                .get()
+                .build()
+            httpClient.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) return@use null
+                val body = resp.body?.string().orEmpty()
+                parseGtxTranslationJson(body)
+            }
+        }.getOrNull()
     }
 
     private val INITIALS = arrayOf("g", "kk", "n", "d", "tt", "r", "m", "b", "pp", "s", "ss", "", "j", "jj", "ch", "k", "t", "p", "h")
@@ -91,23 +206,5 @@ object LyricLanguageHelper {
         'л' to "l", 'м' to "m", 'н' to "n", 'о' to "o", 'п' to "p", 'р' to "r",
         'с' to "s", 'т' to "t", 'у' to "u", 'ф' to "f", 'х' to "kh", 'ц' to "ts",
         'ч' to "ch", 'ш' to "sh", 'щ' to "shch", 'ы' to "y", 'э' to "e", 'ю' to "yu", 'я' to "ya"
-    )
-
-    private val COMMON_GLOSS_EN = mapOf(
-        "aku yang jatuh cinta" to "I'm the one who fell in love",
-        "terima kasih" to "Thank you",
-        "cinta" to "Love",
-        "malam ini" to "Tonight",
-        "sendiri" to "Alone",
-        "namamalik mata" to "Just closing my eyes",
-        "pumikit na muna" to "Close your eyes for now"
-    )
-
-    private val COMMON_GLOSS_ID = mapOf(
-        "i love you" to "Aku mencintaimu",
-        "all night" to "Sepanjang malam",
-        "up all night to get lucky" to "Begadang semalaman mencari keberuntungan",
-        "don't go" to "Jangan pergi",
-        "stay with me" to "Tetap bersamaku"
     )
 }

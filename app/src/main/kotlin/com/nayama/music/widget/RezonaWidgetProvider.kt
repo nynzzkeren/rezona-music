@@ -56,29 +56,40 @@ object RezonaWidgetUpdater {
 
         val controller = RezonaPlayerController.getExistingInstance()
         val track = controller?.currentTrack?.value
-        val title = track?.title ?: "Rezona"
-        val artist = track?.artist ?: "Tap to open player"
+        val title = track?.title ?: "No song playing"
+        val artist = track?.artist ?: "Tap to open Rezona"
         val isPlaying = controller?.isPlaying?.value ?: false
         val isLiked = controller?.isLiked?.value ?: false
         val posMs = controller?.currentPositionMs?.longValue ?: 0L
         val durMs = controller?.durationMs?.longValue ?: 0L
         val progress = if (durMs > 0L) ((posMs * 1000L) / durMs).toInt().coerceIn(0, 1000) else 0
         val artUrl = track?.coverArtUrl.orEmpty()
+        val streakText = "♪ ${cachedPlayCount.coerceAtLeast(if (track != null) 1 else 0)}"
 
         val initialBmp = if (artUrl.isNotBlank() && artUrl == cachedArtUrl) cachedArtBitmap else null
-        pushRemoteViews(appCtx, manager, cardIds, compactIds, title, artist, isPlaying, isLiked, progress, initialBmp)
+        pushRemoteViews(appCtx, manager, cardIds, compactIds, title, artist, streakText, isPlaying, isLiked, progress, initialBmp)
 
-        if (artUrl.isNotBlank() && artUrl != cachedArtUrl) {
-            scope.launch {
-                val bmp = loadRoundedCover(appCtx, artUrl)
-                if (bmp != null) {
-                    cachedArtUrl = artUrl
-                    cachedArtBitmap = bmp
-                    pushRemoteViews(appCtx, manager, cardIds, compactIds, title, artist, isPlaying, isLiked, progress, bmp)
-                }
+        scope.launch {
+            val totalPlays = runCatching {
+                com.nayama.music.data.local.RezonaDatabase.getInstance(appCtx)
+                    .historyDao().getAllEntriesRaw(500).count { !it.deleted }
+            }.getOrDefault(cachedPlayCount)
+            val needsArt = artUrl.isNotBlank() && artUrl != cachedArtUrl
+            val bmp = if (needsArt) loadRoundedCover(appCtx, artUrl) else initialBmp
+            if (bmp != null && needsArt) {
+                cachedArtUrl = artUrl
+                cachedArtBitmap = bmp
+            }
+            if (totalPlays != cachedPlayCount || needsArt) {
+                cachedPlayCount = totalPlays
+                val updatedStreak = "♪ ${totalPlays.coerceAtLeast(if (track != null) 1 else 0)}"
+                pushRemoteViews(appCtx, manager, cardIds, compactIds, title, artist, updatedStreak, isPlaying, isLiked, progress, bmp)
             }
         }
     }
+
+    @Volatile
+    private var cachedPlayCount: Int = 0
 
     private fun pushRemoteViews(
         context: Context,
@@ -87,6 +98,7 @@ object RezonaWidgetUpdater {
         compactIds: IntArray,
         title: String,
         artist: String,
+        streakText: String,
         isPlaying: Boolean,
         isLiked: Boolean,
         progress: Int,
@@ -117,6 +129,7 @@ object RezonaWidgetUpdater {
             val rv = RemoteViews(context.packageName, R.layout.widget_rezona_card)
             rv.setTextViewText(R.id.widget_title, title)
             rv.setTextViewText(R.id.widget_artist, artist)
+            rv.setTextViewText(R.id.widget_streak_badge, streakText)
             rv.setProgressBar(R.id.widget_progress, 1000, progress, false)
             rv.setImageViewResource(R.id.widget_btn_play, playIcon)
             rv.setImageViewResource(R.id.widget_btn_like, likeIcon)

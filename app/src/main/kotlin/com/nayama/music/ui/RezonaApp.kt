@@ -1,9 +1,12 @@
 package com.nayama.music.ui
 
+import android.app.Activity
 import android.app.ActivityManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.widget.Toast
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.Crossfade
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
@@ -133,6 +136,27 @@ fun RezonaApp() {
     var isSettingsVisible by remember { mutableStateOf(false) }
     var isSoundLabVisible by remember { mutableStateOf(false) }
     var availableUpdate by remember { mutableStateOf<RezonaUpdateInfo?>(null) }
+    var lastBackPressMs by remember { mutableStateOf(0L) }
+
+    // Prevent accidental immediate exit on back gesture:
+    // Close overlays -> return to Home tab -> require double-back within 2s to exit.
+    BackHandler(enabled = true) {
+        when {
+            isExpandedPlayerVisible -> isExpandedPlayerVisible = false
+            isSettingsVisible -> isSettingsVisible = false
+            isSoundLabVisible -> isSoundLabVisible = false
+            currentTab != RezonaTab.Home -> currentTab = RezonaTab.Home
+            else -> {
+                val now = System.currentTimeMillis()
+                if (now - lastBackPressMs < 2000L) {
+                    (context as? Activity)?.finish()
+                } else {
+                    lastBackPressMs = now
+                    Toast.makeText(context, "Press back again to exit", Toast.LENGTH_SHORT).show()
+                }
+            }
+        }
+    }
 
     LaunchedEffect(Unit) {
         val dismissedVersion = preferences.dismissedUpdateVersionFlow.first()

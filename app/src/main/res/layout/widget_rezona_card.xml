@@ -1,52 +1,50 @@
 <?xml version="1.0" encoding="utf-8"?>
-<RelativeLayout xmlns:android="http://schemas.android.com/apk/res/android"
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
     android:id="@+id/widget_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@drawable/rezona_widget_glass_bg"
+    android:orientation="vertical"
     android:padding="14dp">
 
+    <!-- Top: Large rounded album art (Auralys-style sleek Liquid Glass card) -->
     <ImageView
         android:id="@+id/widget_cover"
-        android:layout_width="68dp"
-        android:layout_height="68dp"
-        android:layout_alignParentStart="true"
-        android:layout_alignParentTop="true"
+        android:layout_width="108dp"
+        android:layout_height="108dp"
         android:scaleType="centerCrop"
         android:src="@drawable/ic_rezona_logo"
-        android:background="#22FFFFFF"
+        android:background="@drawable/rezona_widget_pill_bg"
         android:contentDescription="Album cover" />
 
-    <ImageButton
-        android:id="@+id/widget_btn_like"
-        android:layout_width="40dp"
-        android:layout_height="40dp"
-        android:layout_alignParentEnd="true"
-        android:layout_alignParentTop="true"
-        android:background="@android:color/transparent"
-        android:scaleType="centerInside"
-        android:padding="8dp"
-        android:src="@drawable/ic_heart_outline"
-        android:contentDescription="Like song" />
-
-    <LinearLayout
+    <!-- Middle: Title + Artist on left, play streak/count badge on right -->
+    <RelativeLayout
         android:id="@+id/widget_meta"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_toEndOf="@id/widget_cover"
-        android:layout_toStartOf="@id/widget_btn_like"
-        android:layout_alignTop="@id/widget_cover"
-        android:layout_marginStart="12dp"
-        android:layout_marginEnd="6dp"
-        android:orientation="vertical">
+        android:layout_marginTop="12dp">
+
+        <TextView
+            android:id="@+id/widget_streak_badge"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_alignParentEnd="true"
+            android:layout_alignParentTop="true"
+            android:text="♪ 0"
+            android:textColor="#CCFFFFFF"
+            android:textSize="12sp"
+            android:textStyle="bold" />
 
         <TextView
             android:id="@+id/widget_title"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:text="Rezona"
+            android:layout_alignParentStart="true"
+            android:layout_toStartOf="@id/widget_streak_badge"
+            android:layout_marginEnd="8dp"
+            android:text="No song playing"
             android:textColor="#FFFFFFFF"
-            android:textSize="15sp"
+            android:textSize="16sp"
             android:textStyle="bold"
             android:maxLines="1"
             android:ellipsize="end" />
@@ -55,61 +53,84 @@
             android:id="@+id/widget_artist"
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
+            android:layout_below="@id/widget_title"
             android:layout_marginTop="2dp"
-            android:text="Tap to play music"
+            android:text="Tap to open Rezona"
             android:textColor="#B8FFFFFF"
-            android:textSize="12sp"
+            android:textSize="13sp"
             android:maxLines="1"
             android:ellipsize="end" />
+    </RelativeLayout>
 
-        <ProgressBar
-            android:id="@+id/widget_progress"
-            style="?android:attr/progressBarStyleHorizontal"
-            android:layout_width="match_parent"
-            android:layout_height="3dp"
-            android:layout_marginTop="10dp"
-            android:max="1000"
-            android:progress="0"
-            android:progressDrawable="@drawable/rezona_widget_progress" />
-    </LinearLayout>
+    <ProgressBar
+        android:id="@+id/widget_progress"
+        style="?android:attr/progressBarStyleHorizontal"
+        android:layout_width="match_parent"
+        android:layout_height="3dp"
+        android:layout_marginTop="8dp"
+        android:max="1000"
+        android:progress="0"
+        android:progressDrawable="@drawable/rezona_widget_progress" />
 
+    <!-- Bottom: Heart · Previous · White circular Play/Pause · Next -->
     <LinearLayout
         android:id="@+id/widget_controls"
         android:layout_width="match_parent"
-        android:layout_height="44dp"
-        android:layout_alignParentBottom="true"
-        android:layout_below="@id/widget_cover"
-        android:layout_marginTop="6dp"
-        android:gravity="center"
+        android:layout_height="50dp"
+        android:layout_marginTop="8dp"
+        android:gravity="center_vertical"
         android:orientation="horizontal">
 
         <ImageButton
-            android:id="@+id/widget_btn_prev"
-            android:layout_width="48dp"
+            android:id="@+id/widget_btn_like"
+            android:layout_width="0dp"
             android:layout_height="44dp"
+            android:layout_weight="1"
             android:background="@android:color/transparent"
+            android:scaleType="centerInside"
+            android:padding="10dp"
+            android:src="@drawable/ic_heart_outline"
+            android:contentDescription="Like song" />
+
+        <ImageButton
+            android:id="@+id/widget_btn_prev"
+            android:layout_width="0dp"
+            android:layout_height="44dp"
+            android:layout_weight="1"
+            android:background="@android:color/transparent"
+            android:scaleType="centerInside"
             android:src="@drawable/ic_skip_previous"
             android:tint="#FFFFFFFF"
             android:contentDescription="Previous" />
 
-        <ImageButton
-            android:id="@+id/widget_btn_play"
-            android:layout_width="56dp"
-            android:layout_height="44dp"
-            android:layout_marginStart="18dp"
-            android:layout_marginEnd="18dp"
-            android:background="@android:color/transparent"
-            android:src="@drawable/ic_play_arrow"
-            android:tint="#FFFFFFFF"
-            android:contentDescription="Play or Pause" />
+        <FrameLayout
+            android:layout_width="0dp"
+            android:layout_height="48dp"
+            android:layout_weight="1.2"
+            android:gravity="center">
+
+            <ImageButton
+                android:id="@+id/widget_btn_play"
+                android:layout_width="46dp"
+                android:layout_height="46dp"
+                android:layout_gravity="center"
+                android:background="@drawable/rezona_widget_play_circle"
+                android:scaleType="centerInside"
+                android:padding="10dp"
+                android:src="@drawable/ic_play_arrow"
+                android:tint="#FF0B0D12"
+                android:contentDescription="Play or Pause" />
+        </FrameLayout>
 
         <ImageButton
             android:id="@+id/widget_btn_next"
-            android:layout_width="48dp"
+            android:layout_width="0dp"
             android:layout_height="44dp"
+            android:layout_weight="1"
             android:background="@android:color/transparent"
+            android:scaleType="centerInside"
             android:src="@drawable/ic_skip_next"
             android:tint="#FFFFFFFF"
             android:contentDescription="Next" />
     </LinearLayout>
-</RelativeLayout>
+</LinearLayout>

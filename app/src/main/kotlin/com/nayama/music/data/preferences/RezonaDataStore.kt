@@ -45,6 +45,7 @@ class RezonaPreferences(private val context: Context) {
         val KEY_GLASS_INTENSITY = stringPreferencesKey("ui_glass_intensity")
         val KEY_AMBIENT_VIVID_PLAYER = booleanPreferencesKey("ui_ambient_vivid_player")
         val KEY_DOCK_FOLD_ON_SCROLL = booleanPreferencesKey("ui_dock_fold_on_scroll")
+        val KEY_DYNAMIC_ISLAND_ENABLED = booleanPreferencesKey("ui_dynamic_island_enabled")
 
         // Lyrics & Translation Settings
         val KEY_LYRICS_TRANSLATION_ENABLED = booleanPreferencesKey("lyrics_translation_enabled")
@@ -252,6 +253,14 @@ class RezonaPreferences(private val context: Context) {
 
     val dismissedUpdateVersionFlow: Flow<Int> = context.dataStore.data.map { prefs ->
         prefs[KEY_DISMISSED_UPDATE_VERSION] ?: 0
+    }
+
+    val dynamicIslandEnabledFlow: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[KEY_DYNAMIC_ISLAND_ENABLED] ?: false
+    }
+
+    suspend fun setDynamicIslandEnabled(enabled: Boolean) {
+        context.dataStore.edit { prefs -> prefs[KEY_DYNAMIC_ISLAND_ENABLED] = enabled }
     }
 
     val pauseHistoryFlow: Flow<Boolean> = context.dataStore.data.map { prefs ->

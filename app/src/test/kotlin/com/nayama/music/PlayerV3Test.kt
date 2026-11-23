@@ -261,5 +261,9 @@ class PlayerV3Test {
 
         val infoSame = RezonaUpdateChecker.parseAndCheck(updateJson, currentVersionCode = 2)
         assertNull(infoSame)
+
+        val gtxJson = """[[["Aku merindukanmu\n","I miss you\n",null,null,10],["Malam ini","Tonight",null,null,10]],null,"en"]"""
+        val translated = com.nayama.music.backend.LyricLanguageHelper.parseGtxTranslationJson(gtxJson)
+        assertEquals("Aku merindukanmu\nMalam ini", translated)
     }
 }

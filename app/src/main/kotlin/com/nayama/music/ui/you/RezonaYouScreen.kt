@@ -552,6 +552,13 @@ fun RezonaYouScreen(
 
     if (showHistorySheet) {
         val tracks = historyEntities.map { it.toRezonaTrack() }.distinctBy { it.id }
+        val playCountByTrack = remember(historyEntries) {
+            historyEntries.groupingBy { it.trackId }.eachCount()
+        }
+        val lastPlayedByTrack = remember(historyEntries) {
+            historyEntries.groupBy { it.trackId }.mapValues { (_, list) -> list.maxOf { it.playedAt } }
+        }
+        val timeFmt = remember { java.text.SimpleDateFormat("dd MMM · HH:mm", java.util.Locale.getDefault()) }
         val sheetState = rememberModalBottomSheetState(skipPartiallyExpanded = true)
         ModalBottomSheet(
             onDismissRequest = { showHistorySheet = false },
@@ -561,11 +568,18 @@ fun RezonaYouScreen(
         ) {
             Column(modifier = Modifier.fillMaxWidth().height(500.dp).padding(horizontal = 20.dp)) {
                 Text("Listening History", style = Typography.titleLarge.copy(fontWeight = FontWeight.Bold), color = PearlWhite)
-                Text("${tracks.size} played tracks", style = Typography.bodySmall, color = SmokySilver)
+                Text("${tracks.size} unique tracks · ${historyEntries.size} total plays", style = Typography.bodySmall, color = SmokySilver)
                 Spacer(modifier = Modifier.height(12.dp))
                 RezonaHairlineDivider()
                 LazyColumn(modifier = Modifier.fillMaxSize()) {
                     items(tracks, key = { "yh_${it.id}" }) { item ->
+                        val plays = playCountByTrack[item.id] ?: 1
+                        val lastAt = lastPlayedByTrack[item.id]
+                        val playedLabel = if (lastAt != null && lastAt > 0L) {
+                            "${plays}× played · ${timeFmt.format(java.util.Date(lastAt))}"
+                        } else {
+                            "${plays}× played"
+                        }
                         Row(
                             modifier = Modifier
                                 .fillMaxWidth()
@@ -581,6 +595,7 @@ fun RezonaYouScreen(
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(item.title, style = Typography.titleMedium, color = PearlWhite, maxLines = 1, overflow = TextOverflow.Ellipsis)
                                 Text(item.artist, style = Typography.bodySmall, color = SmokySilver, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(playedLabel, style = Typography.labelSmall, color = SoftSilver.copy(alpha = 0.8f), maxLines = 1)
                             }
                         }
                         RezonaHairlineDivider(startIndent = 58.dp)
@@ -593,10 +608,22 @@ fun RezonaYouScreen(
     if (showRecapSheet) {
         val totalPlays = historyEntries.size
         val topTracks = mostPlayedEntities.map { it.toRezonaTrack() }
-        val estMinutes = ((topTracks.sumOf { t ->
-            val parts = t.duration.split(":")
-            ((parts.getOrNull(0)?.toLongOrNull() ?: 3L) * 60L + (parts.getOrNull(1)?.toLongOrNull() ?: 30L))
-        }.coerceAtLeast(180L)) / 60L) + (totalPlays * 3L)
+        val playCountByTrack = remember(historyEntries) {
+            historyEntries.groupingBy { it.trackId }.eachCount()
+        }
+        val durationSecById = remember(historyEntities, mostPlayedEntities) {
+            (historyEntities + mostPlayedEntities).associate { entity ->
+                val sec = (entity.durationMs / 1000L).takeIf { it > 0L } ?: 210L
+                entity.id to sec
+            }
+        }
+        val totalListenSec = historyEntries.sumOf { entry ->
+            durationSecById[entry.trackId] ?: 210L
+        }
+        val totalMins = (totalListenSec / 60L).coerceAtLeast(0L)
+        val hours = totalMins / 60L
+        val remMins = totalMins % 60L
+        val listenTimeLabel = if (hours > 0L) "${hours}h ${remMins}m" else "${remMins}m"
 
         RezonaGlassDialog(
             title = "Stats & Recap",
@@ -606,14 +633,22 @@ fun RezonaYouScreen(
             dismissText = null
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("$totalPlays total plays · ~$estMinutes mins on-device", style = Typography.bodyMedium.copy(fontWeight = FontWeight.Bold), color = PureWhite)
+                Text("$totalPlays total plays · $listenTimeLabel listened", style = Typography.bodyMedium.copy(fontWeight = FontWeight.Bold), color = PureWhite)
                 RezonaHairlineDivider()
-                Text("Top Tracks", style = Typography.labelMedium, color = SoftSilver)
+                Text("Top Tracks (Plays & Time)", style = Typography.labelMedium, color = SoftSilver)
                 if (topTracks.isEmpty()) {
                     Text("Play songs to build your local recap.", style = Typography.bodySmall, color = SmokySilver)
                 } else {
                     topTracks.take(5).forEachIndexed { idx, t ->
-                        Text("${idx + 1}. ${t.title} — ${t.artist}", style = Typography.bodySmall, color = PearlWhite, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                        val plays = playCountByTrack[t.id] ?: 1
+                        val trackMins = ((plays * (durationSecById[t.id] ?: 210L)) / 60L).coerceAtLeast(1L)
+                        Text(
+                            text = "${idx + 1}. ${t.title} — ${plays}× (${trackMins}m)",
+                            style = Typography.bodySmall,
+                            color = PearlWhite,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                     }
                 }
             }
