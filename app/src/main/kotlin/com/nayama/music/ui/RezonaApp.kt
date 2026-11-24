@@ -101,6 +101,9 @@ fun RezonaApp() {
     val scope = rememberCoroutineScope()
 
     val dockFoldEnabled by preferences.dockFoldOnScrollFlow.collectAsState(initial = true)
+    val dynamicIslandEnabled by preferences.dynamicIslandEnabledFlow.collectAsState(initial = false)
+    val islandCutoutMode by preferences.dynamicIslandCutoutModeFlow.collectAsState(initial = "Auto")
+    var inAppIslandExpanded by remember { mutableStateOf(false) }
     val authGateSeen by preferences.authGateSeenFlow.collectAsState(initial = null as Boolean?)
     val authSession by authManager.session.collectAsState()
     val syncStatus by syncManager.status.collectAsState()
@@ -292,7 +295,33 @@ fun RezonaApp() {
                 }
             }
 
-            // 3. Full-Screen Expanded Now Playing + Inline Lyrics
+            // 3. Universal In-App Dynamic Island fallback (for devices before/without system overlay permission)
+            if (dynamicIslandEnabled &&
+                !android.provider.Settings.canDrawOverlays(context) &&
+                currentTrack != null &&
+                !isExpandedPlayerVisible &&
+                !isSettingsVisible &&
+                !isSoundLabVisible
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(top = if (islandCutoutMode == "Overlap") 8.dp else 34.dp),
+                    contentAlignment = Alignment.TopCenter
+                ) {
+                    com.nayama.music.overlay.RezonaDynamicIslandCapsule(
+                        controller = playerController,
+                        isExpanded = inAppIslandExpanded,
+                        onExpandedChange = { inAppIslandExpanded = it },
+                        onOpenApp = {
+                            inAppIslandExpanded = false
+                            isExpandedPlayerVisible = true
+                        }
+                    )
+                }
+            }
+
+            // 3b. Full-Screen Expanded Now Playing + Inline Lyrics
             RezonaExpandedPlayer(
                 controller = playerController,
                 isVisible = isExpandedPlayerVisible,

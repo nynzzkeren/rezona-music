@@ -77,6 +77,24 @@ fun RezonaSettingsScreen(
     val vividAmbient by preferences.ambientVividPlayerFlow.collectAsState(initial = true)
     val dockFoldOnScroll by preferences.dockFoldOnScrollFlow.collectAsState(initial = true)
     val dynamicIslandEnabled by preferences.dynamicIslandEnabledFlow.collectAsState(initial = false)
+    val islandCutoutMode by preferences.dynamicIslandCutoutModeFlow.collectAsState(initial = "Auto")
+    var hasOverlayPerm by remember {
+        mutableStateOf(com.nayama.music.overlay.OverlayPermissionHelper.canDrawOverlays(context))
+    }
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
+    androidx.compose.runtime.DisposableEffect(lifecycleOwner, dynamicIslandEnabled) {
+        val obs = androidx.lifecycle.LifecycleEventObserver { _, event ->
+            if (event == androidx.lifecycle.Lifecycle.Event.ON_RESUME) {
+                val granted = com.nayama.music.overlay.OverlayPermissionHelper.canDrawOverlays(context)
+                hasOverlayPerm = granted
+                if (dynamicIslandEnabled && granted) {
+                    com.nayama.music.overlay.RezonaDynamicIslandService.start(context)
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(obs)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(obs) }
+    }
     val cacheLimitMb by preferences.cacheLimitMbFlow.collectAsState(initial = 1024)
     val imageCacheLimitMb by preferences.imageCacheLimitMbFlow.collectAsState(initial = 256)
     val translationEnabled by preferences.lyricsTranslationEnabledFlow.collectAsState(initial = true)
@@ -130,7 +148,12 @@ fun RezonaSettingsScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xE007090D))
+            .background(Color(0xFF07090D))
+            .clickable(
+                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                indication = null,
+                onClick = {}
+            )
             .statusBarsPadding()
             .padding(horizontal = 20.dp)
     ) {
@@ -285,34 +308,29 @@ fun RezonaSettingsScreen(
                         checked = dockFoldOnScroll,
                         onCheckedChange = { coroutineScope.launch { preferences.setDockFoldOnScroll(it) } }
                     )
-                    val hasOverlayPerm = remember(dynamicIslandEnabled) {
-                        android.provider.Settings.canDrawOverlays(context)
-                    }
                     SettingsToggleRow(
                         title = "Dynamic Island Overlay",
                         subtitle = when {
-                            dynamicIslandEnabled && hasOverlayPerm -> "Active · Floating Liquid Glass capsule + live lyrics outside app"
-                            dynamicIslandEnabled && !hasOverlayPerm -> "Needs 'Display over other apps' permission — tap to grant"
-                            else -> "Show floating Liquid Glass capsule + live lyrics around camera cutout"
+                            dynamicIslandEnabled && hasOverlayPerm -> "Active · Outside-app & cutout-aware Liquid Glass island"
+                            dynamicIslandEnabled && !hasOverlayPerm -> "In-app active · Grant overlay permission to show outside Rezona"
+                            else -> "Floating Liquid Glass capsule + 3-line live lyrics & controls"
                         },
-                        checked = dynamicIslandEnabled && hasOverlayPerm,
+                        checked = dynamicIslandEnabled,
                         onCheckedChange = { enabled ->
                             coroutineScope.launch {
                                 preferences.setDynamicIslandEnabled(enabled)
+                                val granted = com.nayama.music.overlay.OverlayPermissionHelper.canDrawOverlays(context)
+                                hasOverlayPerm = granted
                                 if (enabled) {
-                                    if (android.provider.Settings.canDrawOverlays(context)) {
+                                    if (granted) {
                                         com.nayama.music.overlay.RezonaDynamicIslandService.start(context)
                                     } else {
                                         android.widget.Toast.makeText(
                                             context,
-                                            "Allow 'Display over other apps' for Dynamic Island",
+                                            "Enable 'Display over other apps' (Android 13+: App Info -> ⋮ -> Allow restricted settings)",
                                             android.widget.Toast.LENGTH_LONG
                                         ).show()
-                                        val intent = android.content.Intent(
-                                            android.provider.Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                                            android.net.Uri.parse("package:${context.packageName}")
-                                        )
-                                        context.startActivity(intent)
+                                        com.nayama.music.overlay.OverlayPermissionHelper.openOverlayPermissionSettings(context)
                                     }
                                 } else {
                                     com.nayama.music.overlay.RezonaDynamicIslandService.stop(context)
@@ -320,6 +338,70 @@ fun RezonaSettingsScreen(
                             }
                         }
                     )
+                    if (dynamicIslandEnabled) {
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "Camera Cutout Placement",
+                            style = Typography.labelMedium,
+                            color = SoftSilver
+                        )
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            listOf(
+                                "Auto" to "Auto Detect",
+                                "Overlap" to "Overlap Camera",
+                                "Below" to "Below Camera"
+                            ).forEach { (modeKey, modeLabel) ->
+                                val selected = islandCutoutMode == modeKey
+                                RezonaGlassPill(
+                                    isActive = selected,
+                                    onClick = { coroutineScope.launch { preferences.setDynamicIslandCutoutMode(modeKey) } },
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text(
+                                        text = modeLabel,
+                                        fontSize = 11.sp,
+                                        fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium,
+                                        color = if (selected) PureWhite else SoftSilver,
+                                        maxLines = 1
+                                    )
+                                }
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                        if (!hasOverlayPerm) {
+                            RezonaGlassPill(
+                                isActive = true,
+                                onClick = {
+                                    com.nayama.music.overlay.OverlayPermissionHelper.openOverlayPermissionSettings(context)
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = "Grant 'Display over other apps' Permission",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold,
+                                    color = PureWhite
+                                )
+                            }
+                        } else {
+                            RezonaGlassPill(
+                                isActive = false,
+                                onClick = {
+                                    com.nayama.music.overlay.RezonaDynamicIslandService.preview(context)
+                                },
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = "Preview Dynamic Island Now",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = PearlWhite
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.height(8.dp))
+                    }
                     RezonaHairlineDivider()
                 }
             }

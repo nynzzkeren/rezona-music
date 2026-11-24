@@ -46,6 +46,7 @@ class RezonaPreferences(private val context: Context) {
         val KEY_AMBIENT_VIVID_PLAYER = booleanPreferencesKey("ui_ambient_vivid_player")
         val KEY_DOCK_FOLD_ON_SCROLL = booleanPreferencesKey("ui_dock_fold_on_scroll")
         val KEY_DYNAMIC_ISLAND_ENABLED = booleanPreferencesKey("ui_dynamic_island_enabled")
+        val KEY_DYNAMIC_ISLAND_CUTOUT_MODE = stringPreferencesKey("ui_dynamic_island_cutout_mode")
 
         // Lyrics & Translation Settings
         val KEY_LYRICS_TRANSLATION_ENABLED = booleanPreferencesKey("lyrics_translation_enabled")
@@ -259,8 +260,17 @@ class RezonaPreferences(private val context: Context) {
         prefs[KEY_DYNAMIC_ISLAND_ENABLED] ?: false
     }
 
+    // "Auto" | "Overlap" | "Below"
+    val dynamicIslandCutoutModeFlow: Flow<String> = context.dataStore.data.map { prefs ->
+        prefs[KEY_DYNAMIC_ISLAND_CUTOUT_MODE] ?: "Auto"
+    }
+
     suspend fun setDynamicIslandEnabled(enabled: Boolean) {
         context.dataStore.edit { prefs -> prefs[KEY_DYNAMIC_ISLAND_ENABLED] = enabled }
+    }
+
+    suspend fun setDynamicIslandCutoutMode(mode: String) {
+        context.dataStore.edit { prefs -> prefs[KEY_DYNAMIC_ISLAND_CUTOUT_MODE] = mode }
     }
 
     val pauseHistoryFlow: Flow<Boolean> = context.dataStore.data.map { prefs ->

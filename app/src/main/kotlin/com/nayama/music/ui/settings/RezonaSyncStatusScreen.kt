@@ -60,7 +60,7 @@ fun RezonaSyncStatusScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xE007090D))
+            .background(Color(0xFF07090D))
             .statusBarsPadding()
             .padding(horizontal = 20.dp)
     ) {

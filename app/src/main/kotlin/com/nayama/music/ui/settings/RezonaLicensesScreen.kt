@@ -165,7 +165,7 @@ fun RezonaLicensesScreen(
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .background(Color(0xD907090D)) // Translucent glass scrim over shared continuous ambient layer
+            .background(Color(0xFF07090D))
             .statusBarsPadding()
             .padding(horizontal = 16.dp)
     ) {
