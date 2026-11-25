@@ -41,7 +41,7 @@
             align-items: center;
             justify-content: center;
             min-height: 100vh;
-            padding: 68px 18px calc(env(safe-area-inset-bottom, 0px) + 84px);
+            padding: 28px 18px calc(env(safe-area-inset-bottom, 0px) + 96px);
             position: relative;
         }
 
@@ -782,15 +782,15 @@
             justify-content: center;
         }
 
-        /* Slim Landscape Rectangular Ad Bars (Top & Bottom above phone nav bar) */
+        /* Slim Landscape Rectangular Ad Bar (Docked cleanly above phone navigation bar) */
         .ad-landscape-bar {
             width: calc(100% - 24px);
             max-width: 440px;
-            height: 54px;
-            max-height: 54px;
-            padding: 5px 12px;
-            border-radius: 14px;
-            background: rgba(14, 16, 22, 0.86);
+            min-height: 58px;
+            max-height: 82px;
+            padding: 8px 12px;
+            border-radius: 16px;
+            background: rgba(14, 16, 22, 0.90);
             backdrop-filter: blur(20px);
             -webkit-backdrop-filter: blur(20px);
             border: 1px solid rgba(255, 255, 255, 0.16);
@@ -829,44 +829,20 @@
         .ad-landscape-content {
             flex: 1;
             min-width: 0;
-            max-height: 44px;
+            max-height: 64px;
             overflow: hidden;
-            display: flex;
-            align-items: center;
         }
 
-        /* Force any third-party Native Banner images & items into a tiny landscape row */
         .ad-landscape-content img {
-            width: 38px !important;
-            height: 38px !important;
-            max-width: 38px !important;
-            max-height: 38px !important;
-            min-width: 38px !important;
+            width: 44px !important;
+            height: 44px !important;
+            max-width: 44px !important;
+            max-height: 44px !important;
             object-fit: cover !important;
             border-radius: 8px !important;
-            margin: 0 8px 0 0 !important;
-            flex-shrink: 0 !important;
         }
 
-        .ad-landscape-content div,
-        .ad-landscape-content a {
-            display: flex !important;
-            flex-direction: row !important;
-            align-items: center !important;
-            max-height: 42px !important;
-            font-size: 12px !important;
-            line-height: 1.25 !important;
-            color: var(--pearl) !important;
-            text-decoration: none !important;
-            overflow: hidden !important;
-            white-space: nowrap !important;
-            text-overflow: ellipsis !important;
-            margin: 0 !important;
-            padding: 0 !important;
-            background: transparent !important;
-        }
-
-        /* Hide extra stacked native cards so only 1 clean horizontal strip shows */
+        /* Keep only the first Native Banner item so it stays compact and never overlaps */
         .ad-landscape-content [id^="container-"] > div > div:nth-child(n+2),
         .ad-landscape-content [id^="container-"] > a:nth-child(n+2) {
             display: none !important;
@@ -994,7 +970,7 @@
                 try { (window.adsbygoogle = window.adsbygoogle || []).push({}); } catch (_) {}
             }
 
-            // 2. Slim Landscape Strip (Bottom docked above phone nav + mirrored slim Top strip)
+            // 2. Slim Landscape Strip (Bottom docked above phone nav + optional dedicated Top banner)
             if (!mounted && cfg.bannerScriptUrl) {
                 mounted = true;
                 bottomBar.style.display = 'flex';
@@ -1008,21 +984,15 @@
                 s.dataset.cfasync = 'false';
                 s.src = cfg.bannerScriptUrl;
                 bottomBody.appendChild(s);
+            }
 
-                // Mirror compact item into the top landscape bar once Adsterra populates the container
-                if (topBar && topBody && cfg.bannerContainerId) {
-                    const observer = new MutationObserver(() => {
-                        const srcContainer = document.getElementById(cfg.bannerContainerId);
-                        const firstLink = srcContainer ? srcContainer.querySelector('a') : null;
-                        if (firstLink && !topBody.hasChildNodes()) {
-                            const clone = firstLink.cloneNode(true);
-                            topBody.appendChild(clone);
-                            topBar.style.display = 'flex';
-                            observer.disconnect();
-                        }
-                    });
-                    observer.observe(bottomBody, { childList: true, subtree: true });
-                }
+            if (topBar && topBody && cfg.topBannerScriptUrl) {
+                topBar.style.display = 'flex';
+                const ts = document.createElement('script');
+                ts.async = true;
+                ts.dataset.cfasync = 'false';
+                ts.src = cfg.topBannerScriptUrl;
+                topBody.appendChild(ts);
             }
 
             // 3. Optional Social Bar Script
