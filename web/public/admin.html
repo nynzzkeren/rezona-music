@@ -68,6 +68,32 @@
             background: var(--pure-white);
             color: #06080C;
         }
+        .direct-dl-box {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            padding: 12px 14px;
+            margin-bottom: 16px;
+            border-radius: 18px;
+            background: rgba(255,255,255,0.07);
+            border: 1px solid rgba(255,255,255,0.18);
+        }
+        .direct-dl-meta { font-size: 12px; color: var(--soft-silver); line-height: 1.35; }
+        .direct-dl-meta strong { display: block; color: var(--pure-white); font-size: 13px; }
+        .direct-dl-btn {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            padding: 10px 16px;
+            border-radius: 999px;
+            background: var(--pure-white);
+            color: #06080C;
+            font-weight: 800;
+            font-size: 12.5px;
+            text-decoration: none;
+            white-space: nowrap;
+        }
         pre {
             margin-top: 16px;
             padding: 14px;
@@ -87,14 +113,22 @@
         <h1>Rezona Admin Studio</h1>
         <p class="sub">Buat pengumuman In-App APK &amp; format teks Community (WA / Discord) secara otomatis.</p>
 
+        <div class="direct-dl-box">
+            <div class="direct-dl-meta">
+                <strong>Direct Download APK (Tanpa Iklan)</strong>
+                <span>Khusus admin &amp; internal test · Langsung unduh file .apk</span>
+            </div>
+            <a class="direct-dl-btn" href="/Rezona-release.apk" download="Rezona-release.apk">Download APK</a>
+        </div>
+
         <div class="grid-2">
             <div>
                 <label for="verName">Version Name</label>
-                <input id="verName" type="text" value="1.0.2">
+                <input id="verName" type="text" value="1.0.3">
             </div>
             <div>
                 <label for="verCode">Version Code (angka)</label>
-                <input id="verCode" type="number" value="2">
+                <input id="verCode" type="number" value="3">
             </div>
         </div>
 
@@ -165,7 +199,7 @@ Double-back to exit protection</textarea>
                     added: parseLines(addInput),
                     fixed: parseLines(fixInput),
                     improved: parseLines(impInput),
-                    changelog: noteInput.value.trim()
+                    changelog: buildCommunityText()
                 }, null, 2);
             }
 

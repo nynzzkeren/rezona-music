@@ -1,7 +1,7 @@
 param(
-    [string]$VersionName = "1.0.2",
-    [int]$VersionCode = 2,
-    [string]$Title = "Update Rezona V1.0.2",
+    [string]$VersionName = "1.0.3",
+    [int]$VersionCode = 3,
+    [string]$Title = "Update Rezona V1.0.3",
     [string[]]$Add = @("Spatial Prism & Vinyl Studio UI Redesign", "Giant 120fps Spinning Vinyl Record in Now Playing"),
     [string[]]$Fix = @("Dynamic Island anti-ketimpa", "Settings background bleed fix"),
     [string[]]$Improved = @("Smart Camera Cutout placement", "Play count & total listening time"),
