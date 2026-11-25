@@ -1,6 +1,18 @@
-{
-  "versionCode": 2,
-  "versionName": "1.0.1",
-  "apkUrl": "https://github.com/nynzzkeren/rezona-music/raw/main/web/public/Rezona-release.apk",
-  "changelog": "Liquid Glass Home Screen Widgets, Skip Non-Music Intro/Outro, Custom Notification with Love button, Butter-Smooth 120Hz Lyrics & Lyrics Font Style."
+﻿{
+    "versionCode":  2,
+    "versionName":  "1.0.2",
+    "announcementId":  "rezona-v1.0.2-202611252020",
+    "title":  "Update Rezona V1.0.2",
+    "apkUrl":  "https://rezona-music-web.vercel.app",
+    "added":  [
+                  "Fitur A",
+                  "Fitur B"
+              ],
+    "fixed":  [
+                  "Bug X"
+              ],
+    "improved":  [
+                     "UI Y"
+                 ],
+    "changelog":  "Install ulang di : https://rezona-music-web.vercel.app"
 }
