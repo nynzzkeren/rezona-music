@@ -1,8 +1,14 @@
 package com.nayama.music.ui.components
 
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateDpAsState
+import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -36,6 +42,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -53,11 +60,10 @@ import com.nayama.music.ui.theme.Typography
 import kotlin.math.roundToInt
 
 /**
- * Rezona Floating Liquid Glass Mini Player (Stage A Reference Morph):
- * - When expanded (!isNavFolded): sits cleanly above the 4-tab dock (`bottom = 84.dp`, `start = 16.dp`, `end = 16.dp`)
- * - When folded on scroll down (`isNavFolded`): glides down onto the same bottom row next to the
- *   collapsed round tab button (`bottom = 12.dp`, `start = 84.dp`, `end = 16.dp`) with spring motion!
- * - Horizontal drag skips next/previous track; tap expands to Now Playing.
+ * Rezona Original Spinning-Vinyl Studio Mini Player:
+ * - Top glowing specular progress beam
+ * - Spinning circular vinyl-record cover art with center spindle ring
+ * - Track Title & Artist + Coral-Red Heart + Frosted Capsule Play/Pause Pill + Skip Next
  */
 @Composable
 fun RezonaMiniPlayer(
@@ -72,6 +78,14 @@ fun RezonaMiniPlayer(
     val currentPosition = controller.currentPositionMs.longValue
     val duration = controller.durationMs.longValue
     val progressFraction = if (duration > 0) (currentPosition.toFloat() / duration.toFloat()).coerceIn(0f, 1f) else 0f
+
+    val spinTransition = rememberInfiniteTransition(label = "mini_vinyl_spin")
+    val spinDeg by spinTransition.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(tween(8000, easing = LinearEasing), RepeatMode.Restart),
+        label = "mini_deg"
+    )
 
     var dragOffsetX by remember { mutableFloatStateOf(0f) }
     val animatedOffsetX by animateFloatAsState(
@@ -127,9 +141,26 @@ fun RezonaMiniPlayer(
                     indication = ripple(color = PureWhite),
                     onClick = onExpandPlayer
                 ),
-            shape = RoundedCornerShape(30.dp)
+            shape = RoundedCornerShape(24.dp)
         ) {
             Column(modifier = Modifier.fillMaxSize()) {
+                // Top Specular Progress Beam
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 18.dp)
+                        .height(2.dp)
+                        .clip(RoundedCornerShape(1.dp))
+                        .background(Color(0x1FFFFFFF))
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth(fraction = progressFraction)
+                            .height(2.dp)
+                            .background(PureWhite)
+                    )
+                }
+
                 Row(
                     modifier = Modifier
                         .weight(1f)
@@ -137,25 +168,36 @@ fun RezonaMiniPlayer(
                         .padding(start = 10.dp, end = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Squircle Cover Art
+                    // Spinning Circular Vinyl Cover Disc with center spindle ring
+                    val discSize = if (isNavFolded) 40.dp else 44.dp
                     Box(
                         modifier = Modifier
-                            .size(if (isNavFolded) 40.dp else 44.dp)
-                            .clip(RoundedCornerShape(10.dp))
-                            .border(width = 0.75.dp, brush = SpecularCardBorder, shape = RoundedCornerShape(10.dp))
+                            .size(discSize)
+                            .graphicsLayer {
+                                rotationZ = if (isPlaying) spinDeg else 0f
+                            }
+                            .clip(CircleShape)
+                            .border(width = 1.dp, brush = SpecularCardBorder, shape = CircleShape),
+                        contentAlignment = Alignment.Center
                     ) {
                         RezonaAsyncCoverArt(
                             coverArtUrl = track.coverArtUrl,
                             fallbackIndex = track.index,
                             contentDescription = track.title,
-                            shape = RoundedCornerShape(10.dp),
+                            shape = CircleShape,
                             modifier = Modifier.fillMaxSize()
+                        )
+                        Box(
+                            modifier = Modifier
+                                .size(9.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xD907090D))
+                                .border(0.8.dp, PureWhite.copy(alpha = 0.65f), CircleShape)
                         )
                     }
 
-                    Spacer(modifier = Modifier.width(10.dp))
+                    Spacer(modifier = Modifier.width(11.dp))
 
-                    // Title & Artist
                     Column(
                         modifier = Modifier
                             .weight(1f)
@@ -163,8 +205,8 @@ fun RezonaMiniPlayer(
                     ) {
                         Text(
                             text = track.title,
-                            style = Typography.titleMedium.copy(fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold),
-                            color = PearlWhite,
+                            style = Typography.titleMedium.copy(fontSize = 13.5.sp, fontWeight = FontWeight.Bold),
+                            color = PureWhite,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
@@ -177,14 +219,13 @@ fun RezonaMiniPlayer(
                         )
                     }
 
-                    // Action Controls (Heart + White Play/Pause Circle + Skip Next, >= 48dp accessible wrappers)
                     Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(0.dp)
+                        horizontalArrangement = Arrangement.spacedBy(2.dp)
                     ) {
                         Box(
                             modifier = Modifier
-                                .size(if (isNavFolded) 40.dp else 44.dp)
+                                .size(if (isNavFolded) 38.dp else 42.dp)
                                 .clip(CircleShape)
                                 .clickable(
                                     interactionSource = remember { MutableInteractionSource() },
@@ -197,15 +238,18 @@ fun RezonaMiniPlayer(
                                 painter = painterResource(id = if (isLiked) R.drawable.ic_heart_filled else R.drawable.ic_heart_outline),
                                 contentDescription = if (isLiked) "Unlike" else "Like",
                                 tint = if (isLiked) Color(0xFFFF5A6E) else SoftSilver,
-                                modifier = Modifier.size(19.dp)
+                                modifier = Modifier.size(18.dp)
                             )
                         }
 
-                        // Bright PureWhite Play/Pause Circle matching library.jpg & home_1.jpg
+                        // Signature Frosted Capsule Play/Pause Pill
                         Box(
                             modifier = Modifier
-                                .size(if (isNavFolded) 42.dp else 46.dp)
+                                .width(if (isNavFolded) 44.dp else 48.dp)
+                                .height(32.dp)
                                 .clip(CircleShape)
+                                .background(Color(0x28FFFFFF))
+                                .border(0.8.dp, Color(0x4DFFFFFF), CircleShape)
                                 .clickable(
                                     interactionSource = remember { MutableInteractionSource() },
                                     indication = ripple(bounded = true, color = PureWhite),
@@ -213,25 +257,17 @@ fun RezonaMiniPlayer(
                                 ),
                             contentAlignment = Alignment.Center
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(34.dp)
-                                    .clip(CircleShape)
-                                    .background(PureWhite),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    painter = painterResource(id = if (isPlaying) R.drawable.ic_pause else R.drawable.ic_play_arrow),
-                                    contentDescription = if (isPlaying) "Pause" else "Play",
-                                    tint = Color(0xFF08090B),
-                                    modifier = Modifier.size(17.dp)
-                                )
-                            }
+                            Icon(
+                                painter = painterResource(id = if (isPlaying) R.drawable.ic_pause else R.drawable.ic_play_arrow),
+                                contentDescription = if (isPlaying) "Pause" else "Play",
+                                tint = PureWhite,
+                                modifier = Modifier.size(17.dp)
+                            )
                         }
 
                         Box(
                             modifier = Modifier
-                                .size(if (isNavFolded) 40.dp else 44.dp)
+                                .size(if (isNavFolded) 38.dp else 42.dp)
                                 .clip(CircleShape)
                                 .clickable(
                                     interactionSource = remember { MutableInteractionSource() },
@@ -244,27 +280,10 @@ fun RezonaMiniPlayer(
                                 painter = painterResource(id = R.drawable.ic_skip_next),
                                 contentDescription = "Next Track",
                                 tint = PearlWhite,
-                                modifier = Modifier.size(20.dp)
+                                modifier = Modifier.size(19.dp)
                             )
                         }
                     }
-                }
-
-                // Bottom Hairline Progress Bar
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp)
-                        .height(2.dp)
-                        .clip(RoundedCornerShape(1.dp))
-                        .background(Color(0x1EFFFFFF))
-                ) {
-                    Box(
-                        modifier = Modifier
-                            .fillMaxWidth(fraction = progressFraction)
-                            .height(2.dp)
-                            .background(PureWhite)
-                    )
                 }
             }
         }

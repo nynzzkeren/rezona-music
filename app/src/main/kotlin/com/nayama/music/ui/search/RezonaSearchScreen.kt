@@ -59,7 +59,6 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -67,7 +66,6 @@ import androidx.core.content.ContextCompat
 import com.nayama.music.R
 import com.nayama.music.backend.LocalMediaScanner
 import com.nayama.music.backend.MusicEngineRepository
-import com.nayama.music.backend.innertube.InnerTubeFilter
 import com.nayama.music.data.repository.RezonaLibraryRepository
 import com.nayama.music.data.repository.toRezonaTrack
 import com.nayama.music.model.RezonaTrack
@@ -77,10 +75,8 @@ import com.nayama.music.ui.components.GlassSurfaceVariant
 import com.nayama.music.ui.components.LocalRezonaHazeState
 import com.nayama.music.ui.components.RezonaAsyncCoverArt
 import com.nayama.music.ui.components.RezonaEqualizerModalSheet
-import com.nayama.music.ui.components.RezonaGlassButton
 import com.nayama.music.ui.components.RezonaGlassCard
 import com.nayama.music.ui.components.RezonaGlassPill
-import com.nayama.music.ui.components.RezonaHairlineDivider
 import com.nayama.music.ui.components.RezonaTrackMenuSheet
 import com.nayama.music.ui.components.rezonaHazeSource
 import com.nayama.music.ui.home.REAL_POPULAR_SEEDS
@@ -89,33 +85,32 @@ import com.nayama.music.ui.theme.PearlWhite
 import com.nayama.music.ui.theme.PureWhite
 import com.nayama.music.ui.theme.SmokySilver
 import com.nayama.music.ui.theme.SoftSilver
+import com.nayama.music.ui.theme.SpecularCardBorder
 import com.nayama.music.ui.theme.SpecularDockBorder
 import com.nayama.music.ui.theme.Typography
 import com.nayama.music.ui.util.GenerativeMoodPattern
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-private val BROWSE_GENRES = listOf(
-    "Pop" to 0,
-    "Dangdut" to 1,
-    "Hip-hop" to 2,
-    "Indie" to 3,
-    "R&B" to 4,
-    "Lo-fi" to 5,
-    "Electronic" to 6,
-    "Jazz" to 7
+private val SONIC_TERRITORIES = listOf(
+    Triple("Pop & Viral", "Global chart toppers", 0),
+    Triple("Indie & Alt", "Warm guitars & bedroom pop", 3),
+    Triple("Lo-fi Study", "Dusty beats & rain", 5),
+    Triple("Hip-hop", "808s & sharp bars", 2),
+    Triple("R&B Soul", "Velvet late-night vocals", 4),
+    Triple("Dangdut & Indo", "Nusantara rhythm", 1),
+    Triple("Electronic", "Club & synthwave", 6),
+    Triple("Jazz Lounge", "Brass & midnight keys", 7)
 )
 
 private val CONTENT_FILTERS = listOf("All", "Songs", "Videos", "Albums", "Artists", "Playlists")
 
 /**
- * Stage B Search Screen (`search_home.jpg` + `search_results.jpg` reference structure):
- * - Header: back arrow + glass pill search field ("Search songs, albums, artists...") + clear button
- * - Segmented switch: Online | On device (MediaStore with runtime permission & rationale)
- * - Idle state: Recently played covers, Most played numbered rows, Favorite artists circles, Browse all 2-col generative tiles
- * - Typing state: Live suggestions list (magnifier, text, diagonal insert arrow) + unboxed plain result rows (56dp cover,
- *   play overlay on first row, 3-dot menu, NO source badges) + infinite scroll continuation tokens
- * - Floating glass Voice Mic button anchored at bottom-right above dock/mini-player
+ * Rezona Original Spatial Search Screen ("Frequency Radar & Sonic Bento"):
+ * - Top Masthead "Discover" with inline Cloud / Device frosted mode switcher
+ * - Unified Command Capsule with Search Input + Clear + Built-in Voice Mic Disc
+ * - Idle state: Recent Spins vinyl chips, Artist Portrait Cards, Asymmetric Sonic Territory Bento Grid
+ * - Results state: Top Match Hero Spotlight Card + Frosted Result Rows + infinite continuation
  */
 @Composable
 fun RezonaSearchScreen(
@@ -139,7 +134,6 @@ fun RezonaSearchScreen(
     var isOnDeviceMode by remember { mutableStateOf(false) }
     var selectedFilter by remember { mutableStateOf("All") }
 
-    // Permissions & On-Device Audio
     val requiredAudioPerm = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
         Manifest.permission.READ_MEDIA_AUDIO
     } else {
@@ -167,7 +161,6 @@ fun RezonaSearchScreen(
         }
     }
 
-    // Idle history feeds from Room
     val recentEntities by libraryRepo.getRecentHistory(15).collectAsState(initial = emptyList())
     val mostPlayedEntities by libraryRepo.getMostPlayed(8).collectAsState(initial = emptyList())
     val recentlyPlayedTracks = remember(recentEntities) {
@@ -177,13 +170,11 @@ fun RezonaSearchScreen(
         mostPlayedEntities.map { it.toRezonaTrack() }.ifEmpty { recentlyPlayedTracks }.take(6)
     }
     val favoriteArtists = remember(mostPlayedTracks, recentlyPlayedTracks) {
-        val pool = (mostPlayedTracks + recentlyPlayedTracks).distinctBy {
+        (mostPlayedTracks + recentlyPlayedTracks).distinctBy {
             it.artist.substringBefore(" ft.").substringBefore(",").trim()
-        }
-        pool.take(8)
+        }.take(8)
     }
 
-    // Search & Continuation State
     var remoteResults by remember { mutableStateOf<List<RezonaTrack>>(emptyList()) }
     var continuationToken by remember { mutableStateOf<String?>(null) }
     var isLoadingMore by remember { mutableStateOf(false) }
@@ -196,7 +187,6 @@ fun RezonaSearchScreen(
     var menuTrack by remember { mutableStateOf<RezonaTrack?>(null) }
     var showEqualizer by remember { mutableStateOf(false) }
 
-    // 200ms debounce
     LaunchedEffect(searchQuery) {
         val q = searchQuery.trim()
         if (q.isEmpty()) {
@@ -212,14 +202,12 @@ fun RezonaSearchScreen(
         }
     }
 
-    // Load local MediaStore audio in On-Device mode
     LaunchedEffect(isOnDeviceMode, hasAudioPermission, debouncedQuery) {
         if (isOnDeviceMode && hasAudioPermission) {
             onDeviceTracks = LocalMediaScanner.scanDeviceAudio(context, debouncedQuery)
         }
     }
 
-    // Progressive YouTube Music search + suggestions + continuation token
     LaunchedEffect(debouncedQuery, selectedFilter, isOnDeviceMode, searchRetryTrigger) {
         if (!isOnDeviceMode && debouncedQuery.isNotEmpty()) {
             isSearchingRemote = true
@@ -249,7 +237,6 @@ fun RezonaSearchScreen(
         }
     }
 
-    // Infinite scroll trigger near bottom
     val shouldLoadMore by remember {
         derivedStateOf {
             val total = listState.layoutInfo.totalItemsCount
@@ -281,208 +268,325 @@ fun RezonaSearchScreen(
                 .fillMaxSize()
                 .nestedScroll(scrollConnection)
                 .rezonaHazeSource(hazeState),
-            contentPadding = PaddingValues(top = statusTop + 12.dp, bottom = bottomPad),
-            verticalArrangement = Arrangement.spacedBy(18.dp)
+            contentPadding = PaddingValues(top = statusTop + 14.dp, bottom = bottomPad),
+            verticalArrangement = Arrangement.spacedBy(20.dp)
         ) {
-            // ── 1. HEADER: Back Arrow + Glass Pill Search Field ──────────────
-            item(key = "search_top_bar") {
+            // ── 1. COMMAND MASTHEAD + INLINE CLOUD/DEVICE SWITCHER ───────────
+            item(key = "search_command_header") {
                 Column(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .padding(horizontal = 16.dp),
-                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                        .padding(horizontal = 20.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
+                        Column {
+                            Text(
+                                text = "Discover",
+                                style = Typography.displayLarge.copy(
+                                    fontSize = 30.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    letterSpacing = (-0.5).sp
+                                ),
+                                color = PureWhite
+                            )
+                            Text(
+                                text = if (isOnDeviceMode) "Scanning local device storage" else "Global YouTube Music catalog",
+                                style = Typography.bodySmall.copy(fontSize = 12.sp),
+                                color = SoftSilver
+                            )
+                        }
+
+                        // Compact Cloud / Device capsule switch
+                        Row(
+                            modifier = Modifier
+                                .height(38.dp)
+                                .clip(CircleShape)
+                                .background(Color(0x16FFFFFF))
+                                .border(0.8.dp, SpecularDockBorder, CircleShape)
+                                .padding(3.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            ModeChip(
+                                label = "Cloud",
+                                selected = !isOnDeviceMode,
+                                onClick = { isOnDeviceMode = false }
+                            )
+                            ModeChip(
+                                label = "Device",
+                                selected = isOnDeviceMode,
+                                onClick = { isOnDeviceMode = true }
+                            )
+                        }
+                    }
+
+                    // Unified Command Capsule: Search Icon + Input + Clear + Voice Mic Disc
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(54.dp)
+                            .clip(RoundedCornerShape(22.dp))
+                            .background(
+                                Brush.verticalGradient(
+                                    listOf(Color(0x22FFFFFF), Color(0x10FFFFFF))
+                                )
+                            )
+                            .border(1.dp, SpecularDockBorder, RoundedCornerShape(22.dp))
+                            .padding(start = 16.dp, end = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_rezona_search),
+                            contentDescription = null,
+                            tint = SoftSilver,
+                            modifier = Modifier.size(19.dp)
+                        )
+                        Spacer(modifier = Modifier.width(12.dp))
+                        Box(
+                            modifier = Modifier.weight(1f),
+                            contentAlignment = Alignment.CenterStart
+                        ) {
+                            if (searchQuery.isEmpty()) {
+                                Text(
+                                    text = if (isOnDeviceMode) "Filter local MP3 / FLAC..." else "Songs, artists, lyrics, moods...",
+                                    style = Typography.bodyMedium.copy(fontSize = 14.5.sp),
+                                    color = SmokySilver,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            BasicTextField(
+                                value = searchQuery,
+                                onValueChange = { searchQuery = it },
+                                singleLine = true,
+                                textStyle = TextStyle(
+                                    color = PureWhite,
+                                    fontSize = 15.sp,
+                                    fontWeight = FontWeight.Medium
+                                ),
+                                cursorBrush = SolidColor(PureWhite),
+                                modifier = Modifier.fillMaxWidth()
+                            )
+                        }
+                        if (searchQuery.isNotEmpty()) {
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(CircleShape)
+                                    .clickable { searchQuery = "" },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    painter = painterResource(id = R.drawable.ic_close),
+                                    contentDescription = "Clear search",
+                                    tint = SoftSilver,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                            }
+                        }
                         Box(
                             modifier = Modifier
-                                .size(48.dp)
-                                .clip(CircleShape)
+                                .size(42.dp)
+                                .clip(RoundedCornerShape(16.dp))
+                                .background(Color(0x24FFFFFF))
+                                .border(0.75.dp, Color(0x40FFFFFF), RoundedCornerShape(16.dp))
                                 .clickable {
-                                    if (searchQuery.isNotEmpty()) searchQuery = "" else onBack()
+                                    val started = runCatching {
+                                        val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
+                                            putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
+                                            putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak a song, artist, or lyrics...")
+                                        }
+                                        voiceLauncher.launch(intent)
+                                        true
+                                    }.getOrDefault(false)
+                                    if (!started) {
+                                        Toast.makeText(context, "Voice recognition not available on this device", Toast.LENGTH_SHORT).show()
+                                    }
                                 },
                             contentAlignment = Alignment.Center
                         ) {
                             Icon(
-                                painter = painterResource(id = R.drawable.ic_arrow_back),
-                                contentDescription = "Back",
+                                painter = painterResource(id = R.drawable.ic_mic),
+                                contentDescription = "Voice Search",
                                 tint = PureWhite,
-                                modifier = Modifier.size(21.dp)
+                                modifier = Modifier.size(19.dp)
                             )
                         }
-
-                        Spacer(modifier = Modifier.width(6.dp))
-
-                        GlassSurface(
-                            variant = GlassSurfaceVariant.Field,
-                            modifier = Modifier
-                                .weight(1f)
-                                .height(48.dp),
-                            shape = RoundedCornerShape(24.dp),
-                            isFocused = searchQuery.isNotEmpty()
-                        ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .padding(horizontal = 14.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Icon(
-                                    painter = painterResource(id = R.drawable.ic_rezona_search),
-                                    contentDescription = null,
-                                    tint = SoftSilver,
-                                    modifier = Modifier.size(18.dp)
-                                )
-                                Spacer(modifier = Modifier.width(10.dp))
-                                Box(modifier = Modifier.weight(1f), contentAlignment = Alignment.CenterStart) {
-                                    if (searchQuery.isEmpty()) {
-                                        Text(
-                                            text = "Search songs, albums, artists...",
-                                            style = Typography.bodyMedium.copy(fontSize = 14.sp),
-                                            color = SmokySilver,
-                                            maxLines = 1,
-                                            overflow = TextOverflow.Ellipsis
-                                        )
-                                    }
-                                    BasicTextField(
-                                        value = searchQuery,
-                                        onValueChange = { searchQuery = it },
-                                        singleLine = true,
-                                        textStyle = TextStyle(color = PureWhite, fontSize = 14.sp),
-                                        cursorBrush = SolidColor(PureWhite),
-                                        modifier = Modifier.fillMaxWidth()
-                                    )
-                                }
-                                if (searchQuery.isNotEmpty()) {
-                                    Box(
-                                        modifier = Modifier
-                                            .size(34.dp)
-                                            .clip(CircleShape)
-                                            .clickable { searchQuery = "" },
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            painter = painterResource(id = R.drawable.ic_close),
-                                            contentDescription = "Clear search",
-                                            tint = SoftSilver,
-                                            modifier = Modifier.size(17.dp)
-                                        )
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    // ── 2. SEGMENTED GLASS SWITCH: Online | On device ────────
-                    val switchShape = RoundedCornerShape(24.dp)
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(44.dp)
-                            .clip(switchShape)
-                            .background(Brush.verticalGradient(listOf(Color(0x1CFFFFFF), Color(0x0AFFFFFF))))
-                            .border(0.75.dp, SpecularDockBorder, switchShape)
-                            .padding(3.dp)
-                    ) {
-                        SegmentedOption(
-                            label = "Online",
-                            isSelected = !isOnDeviceMode,
-                            onClick = { isOnDeviceMode = false },
-                            modifier = Modifier.weight(1f)
-                        )
-                        SegmentedOption(
-                            label = "On device",
-                            isSelected = isOnDeviceMode,
-                            onClick = { isOnDeviceMode = true },
-                            modifier = Modifier.weight(1f)
-                        )
                     }
                 }
             }
 
+            // ── 2. ON-DEVICE MODE ────────────────────────────────────────────
             if (isOnDeviceMode) {
-                // ── ON-DEVICE AUDIO MODE (MediaStore + Rationale) ────────────
                 if (!hasAudioPermission) {
-                    item(key = "on_device_rationale") {
-                        RezonaGlassCard(modifier = Modifier.padding(horizontal = 20.dp)) {
+                    item(key = "device_perm_card") {
+                        RezonaGlassCard(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 20.dp),
+                            shape = RoundedCornerShape(24.dp)
+                        ) {
                             Column(
                                 modifier = Modifier.padding(20.dp),
-                                verticalArrangement = Arrangement.spacedBy(10.dp)
+                                verticalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                Text("Local Audio Access", style = Typography.titleLarge.copy(fontWeight = FontWeight.Bold), color = PearlWhite)
                                 Text(
-                                    text = "Allow Rezona to scan audio files stored on your device so you can play local MP3, FLAC, and M4A tracks alongside your library.",
-                                    style = Typography.bodyMedium,
-                                    color = SmokySilver
+                                    text = "Unlock Local Audio Files",
+                                    style = Typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                                    color = PureWhite
                                 )
-                                RezonaGlassButton(
-                                    text = "Grant Audio Access",
-                                    isPrimary = true,
-                                    onClick = { permissionLauncher.launch(requiredAudioPerm) },
-                                    modifier = Modifier.fillMaxWidth()
+                                Text(
+                                    text = "Grant media permission to play offline MP3, FLAC, and WAV tracks stored on your phone.",
+                                    style = Typography.bodySmall,
+                                    color = SoftSilver
                                 )
+                                RezonaGlassPill(
+                                    isActive = true,
+                                    onClick = { permissionLauncher.launch(requiredAudioPerm) }
+                                ) {
+                                    Text("Allow Audio Access", style = Typography.labelLarge.copy(fontWeight = FontWeight.Bold), color = PureWhite)
+                                }
                             }
                         }
                     }
                 } else if (onDeviceTracks.isEmpty()) {
-                    item(key = "on_device_empty") {
-                        Box(modifier = Modifier.fillMaxWidth().padding(32.dp), contentAlignment = Alignment.Center) {
-                            Text("No local audio files found on device.", style = Typography.bodyMedium, color = SmokySilver)
+                    item(key = "device_empty") {
+                        Box(modifier = Modifier.fillMaxWidth().padding(36.dp), contentAlignment = Alignment.Center) {
+                            Text("No matching audio files on this device.", style = Typography.bodyMedium, color = SmokySilver)
                         }
                     }
                 } else {
-                    itemsIndexed(onDeviceTracks, key = { _, t -> t.id }) { idx, track ->
-                        V2SearchResultRow(
+                    itemsIndexed(onDeviceTracks, key = { idx, t -> "dev_${t.id}_$idx" }) { _, track ->
+                        FrostedResultRow(
                             track = track,
-                            isFirstRow = idx == 0,
-                            onPlay = { controller.playTrack(track, queueTitle = "On Device Audio") },
+                            onPlay = { onTrackSelected(track) },
                             onMoreClick = { menuTrack = track },
                             modifier = Modifier.padding(horizontal = 20.dp)
                         )
                     }
                 }
             } else if (debouncedQuery.isEmpty()) {
-                // ── IDLE STATE (`search_home.jpg`) ───────────────────────────
-                item(key = "idle_recently_played") {
+                // ── 3. IDLE RADAR STATE: Vinyl Spins + Artist Portraits + Genre Bento ─
+                item(key = "idle_recent_vinyl_chips") {
                     Column(modifier = Modifier.fillMaxWidth()) {
                         Text(
-                            text = "Recently played",
-                            style = Typography.titleLarge.copy(fontSize = 19.sp, fontWeight = FontWeight.Bold),
+                            text = "Recent Spins",
+                            style = Typography.titleMedium.copy(fontSize = 17.sp, fontWeight = FontWeight.Bold),
                             color = PureWhite,
                             modifier = Modifier.padding(horizontal = 20.dp)
                         )
-                        Spacer(modifier = Modifier.height(12.dp))
+                        Spacer(modifier = Modifier.height(10.dp))
                         LazyRow(
                             contentPadding = PaddingValues(horizontal = 20.dp),
-                            horizontalArrangement = Arrangement.spacedBy(14.dp)
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
-                            items(recentlyPlayedTracks.take(10), key = { "rp_${it.id}" }) { track ->
-                                Column(
-                                    modifier = Modifier
-                                        .width(148.dp)
-                                        .clickable {
-                                            scope.launch { libraryRepo.saveSearchQuery(track.title) }
-                                            onTrackSelected(track)
-                                        }
+                            items(recentlyPlayedTracks.take(10), key = { "rec_chip_${it.id}" }) { track ->
+                                GlassSurface(
+                                    variant = GlassSurfaceVariant.Button,
+                                    shape = CircleShape,
+                                    onClick = { onTrackSelected(track) }
                                 ) {
-                                    RezonaAsyncCoverArt(
-                                        coverArtUrl = track.coverArtUrl,
-                                        fallbackIndex = track.index,
-                                        shape = RoundedCornerShape(14.dp),
-                                        modifier = Modifier.size(148.dp)
-                                    )
-                                    Spacer(modifier = Modifier.height(8.dp))
-                                    Text(text = track.title, style = Typography.titleMedium.copy(fontWeight = FontWeight.SemiBold), color = PearlWhite, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    Text(text = track.artist, style = Typography.bodySmall, color = SmokySilver, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    Row(
+                                        modifier = Modifier
+                                            .height(46.dp)
+                                            .padding(start = 6.dp, end = 14.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        RezonaAsyncCoverArt(
+                                            coverArtUrl = track.coverArtUrl,
+                                            fallbackIndex = track.index,
+                                            shape = CircleShape,
+                                            modifier = Modifier
+                                                .size(34.dp)
+                                                .border(0.8.dp, SpecularCardBorder, CircleShape)
+                                        )
+                                        Spacer(modifier = Modifier.width(9.dp))
+                                        Column {
+                                            Text(
+                                                text = track.title,
+                                                style = Typography.labelLarge.copy(fontSize = 12.5.sp, fontWeight = FontWeight.Bold),
+                                                color = PureWhite,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Text(
+                                                text = track.artist,
+                                                style = Typography.labelSmall.copy(fontSize = 10.5.sp),
+                                                color = SmokySilver,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
                                 }
                             }
                         }
                     }
                 }
 
-                item(key = "idle_most_played") {
+                if (favoriteArtists.isNotEmpty()) {
+                    item(key = "idle_artist_portraits") {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            Text(
+                                text = "Artist Frequencies",
+                                style = Typography.titleMedium.copy(fontSize = 17.sp, fontWeight = FontWeight.Bold),
+                                color = PureWhite,
+                                modifier = Modifier.padding(horizontal = 20.dp)
+                            )
+                            Spacer(modifier = Modifier.height(10.dp))
+                            LazyRow(
+                                contentPadding = PaddingValues(horizontal = 20.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                items(favoriteArtists, key = { "fav_art_${it.id}" }) { item ->
+                                    val cleanArtist = item.artist.substringBefore(" ft.").substringBefore(",").trim()
+                                    RezonaGlassCard(
+                                        modifier = Modifier
+                                            .width(114.dp)
+                                            .clickable { searchQuery = cleanArtist },
+                                        shape = RoundedCornerShape(22.dp)
+                                    ) {
+                                        Column(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .padding(12.dp),
+                                            horizontalAlignment = Alignment.CenterHorizontally
+                                        ) {
+                                            RezonaAsyncCoverArt(
+                                                coverArtUrl = item.coverArtUrl,
+                                                fallbackIndex = item.index,
+                                                shape = CircleShape,
+                                                modifier = Modifier
+                                                    .size(68.dp)
+                                                    .border(1.dp, SpecularCardBorder, CircleShape)
+                                            )
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            Text(
+                                                text = cleanArtist,
+                                                style = Typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                                color = PureWhite,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Text(
+                                                text = "Explore",
+                                                style = Typography.labelSmall.copy(fontSize = 10.5.sp),
+                                                color = SoftSilver
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // Asymmetric Sonic Territory Bento Grid
+                item(key = "idle_sonic_bento") {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -490,135 +594,44 @@ fun RezonaSearchScreen(
                         verticalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
                         Text(
-                            text = "Most played",
-                            style = Typography.titleLarge.copy(fontSize = 19.sp, fontWeight = FontWeight.Bold),
+                            text = "Sonic Territories",
+                            style = Typography.titleMedium.copy(fontSize = 17.sp, fontWeight = FontWeight.Bold),
                             color = PureWhite
                         )
-                        mostPlayedTracks.forEachIndexed { idx, track ->
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(10.dp))
-                                    .clickable { onTrackSelected(track) }
-                                    .padding(vertical = 4.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Text(
-                                    text = "${idx + 1}",
-                                    style = Typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                    color = SoftSilver,
-                                    textAlign = TextAlign.Center,
-                                    modifier = Modifier.width(26.dp)
-                                )
-                                Spacer(modifier = Modifier.width(10.dp))
-                                RezonaAsyncCoverArt(
-                                    coverArtUrl = track.coverArtUrl,
-                                    fallbackIndex = track.index,
-                                    shape = RoundedCornerShape(8.dp),
-                                    modifier = Modifier.size(56.dp)
-                                )
-                                Spacer(modifier = Modifier.width(12.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(text = track.title, style = Typography.titleMedium.copy(fontWeight = FontWeight.SemiBold), color = PearlWhite, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    Text(text = track.artist, style = Typography.bodySmall, color = SmokySilver, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                }
-                            }
-                        }
-                    }
-                }
 
-                item(key = "idle_favorite_artists") {
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        Text(
-                            text = "Favorite artists",
-                            style = Typography.titleLarge.copy(fontSize = 19.sp, fontWeight = FontWeight.Bold),
-                            color = PureWhite,
-                            modifier = Modifier.padding(horizontal = 20.dp)
+                        // Featured wide bento banner + 2-column sculpted cards
+                        val leadTerritory = SONIC_TERRITORIES.first()
+                        TerritoryBentoTile(
+                            title = leadTerritory.first,
+                            subtitle = leadTerritory.second,
+                            patternIdx = leadTerritory.third,
+                            heightDp = 96,
+                            onClick = { searchQuery = "${leadTerritory.first} hits" },
+                            modifier = Modifier.fillMaxWidth()
                         )
-                        Spacer(modifier = Modifier.height(12.dp))
-                        LazyRow(
-                            contentPadding = PaddingValues(horizontal = 20.dp),
-                            horizontalArrangement = Arrangement.spacedBy(16.dp)
-                        ) {
-                            items(favoriteArtists, key = { "fav_art_${it.artist}" }) { item ->
-                                val cleanArtist = item.artist.substringBefore(" ft.").substringBefore(",").trim()
-                                Column(
-                                    modifier = Modifier
-                                        .width(86.dp)
-                                        .clickable { searchQuery = cleanArtist },
-                                    horizontalAlignment = Alignment.CenterHorizontally
-                                ) {
-                                    RezonaAsyncCoverArt(
-                                        coverArtUrl = item.coverArtUrl,
-                                        fallbackIndex = item.index,
-                                        shape = CircleShape,
-                                        modifier = Modifier.size(84.dp)
-                                    )
-                                    Spacer(modifier = Modifier.height(6.dp))
-                                    Text(
-                                        text = cleanArtist,
-                                        style = Typography.labelMedium.copy(fontWeight = FontWeight.Medium),
-                                        color = PearlWhite,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        textAlign = TextAlign.Center
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
 
-                item(key = "idle_browse_all") {
-                    Column(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(horizontal = 20.dp),
-                        verticalArrangement = Arrangement.spacedBy(10.dp)
-                    ) {
-                        Text(
-                            text = "Browse all",
-                            style = Typography.titleLarge.copy(fontSize = 19.sp, fontWeight = FontWeight.Bold),
-                            color = PureWhite
-                        )
-                        BROWSE_GENRES.chunked(2).forEach { pair ->
+                        SONIC_TERRITORIES.drop(1).chunked(2).forEachIndexed { rowIdx, pair ->
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
                             ) {
-                                pair.forEach { (genre, patternIdx) ->
-                                    GlassSurface(
-                                        variant = GlassSurfaceVariant.Button,
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .height(68.dp),
-                                        shape = RoundedCornerShape(16.dp),
-                                        onClick = { searchQuery = "$genre hits" }
-                                    ) {
-                                        Box(modifier = Modifier.fillMaxSize()) {
-                                            GenerativeMoodPattern(
-                                                index = patternIdx,
-                                                modifier = Modifier
-                                                    .fillMaxSize()
-                                                    .alpha(0.38f)
-                                            )
-                                            Text(
-                                                text = genre,
-                                                style = Typography.titleMedium.copy(fontWeight = FontWeight.Bold, fontSize = 15.sp),
-                                                color = PureWhite,
-                                                modifier = Modifier
-                                                    .align(Alignment.CenterStart)
-                                                    .padding(horizontal = 16.dp)
-                                            )
-                                        }
-                                    }
+                                pair.forEachIndexed { colIdx, (genre, desc, patIdx) ->
+                                    TerritoryBentoTile(
+                                        title = genre,
+                                        subtitle = desc,
+                                        patternIdx = patIdx,
+                                        heightDp = if ((rowIdx + colIdx) % 2 == 0) 88 else 82,
+                                        onClick = { searchQuery = "$genre music" },
+                                        modifier = Modifier.weight(1f)
+                                    )
                                 }
+                                if (pair.size == 1) Spacer(modifier = Modifier.weight(1f))
                             }
                         }
                     }
                 }
             } else {
-                // ── TYPING & RESULTS STATE (`search_results.jpg`) ────────────
+                // ── 4. ACTIVE SEARCH STATE: Filters + Suggestion Pills + Top Match Hero ─
                 item(key = "search_filter_chips") {
                     LazyRow(
                         contentPadding = PaddingValues(horizontal = 20.dp),
@@ -640,52 +653,37 @@ fun RezonaSearchScreen(
                     }
                 }
 
-                // Live Autocomplete Suggestions (magnifier + text + diagonal insert arrow)
                 if (searchSuggestions.isNotEmpty()) {
-                    item(key = "live_suggestions") {
-                        Column(
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .padding(horizontal = 20.dp)
+                    item(key = "live_suggestion_pills") {
+                        LazyRow(
+                            contentPadding = PaddingValues(horizontal = 20.dp),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
                         ) {
-                            searchSuggestions.forEach { suggestion ->
-                                Row(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .clickable {
-                                            searchQuery = suggestion
-                                            scope.launch { libraryRepo.saveSearchQuery(suggestion) }
-                                        }
-                                        .padding(vertical = 10.dp),
-                                    verticalAlignment = Alignment.CenterVertically
+                            items(searchSuggestions, key = { "sug_$it" }) { suggestion ->
+                                GlassSurface(
+                                    variant = GlassSurfaceVariant.Button,
+                                    shape = CircleShape,
+                                    onClick = {
+                                        searchQuery = suggestion
+                                        scope.launch { libraryRepo.saveSearchQuery(suggestion) }
+                                    }
                                 ) {
-                                    Icon(
-                                        painter = painterResource(id = R.drawable.ic_rezona_search),
-                                        contentDescription = null,
-                                        tint = SoftSilver,
-                                        modifier = Modifier.size(18.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(14.dp))
-                                    Text(
-                                        text = suggestion,
-                                        style = Typography.bodyLarge.copy(fontSize = 14.5.sp),
-                                        color = PearlWhite,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                    Box(
-                                        modifier = Modifier
-                                            .size(36.dp)
-                                            .clip(CircleShape)
-                                            .clickable { searchQuery = suggestion },
-                                        contentAlignment = Alignment.Center
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                                     ) {
                                         Icon(
                                             painter = painterResource(id = R.drawable.ic_arrow_insert),
-                                            contentDescription = "Insert into search field",
+                                            contentDescription = null,
                                             tint = SoftSilver,
-                                            modifier = Modifier.size(17.dp)
+                                            modifier = Modifier.size(13.dp)
+                                        )
+                                        Text(
+                                            text = suggestion,
+                                            style = Typography.labelMedium,
+                                            color = PearlWhite,
+                                            maxLines = 1
                                         )
                                     }
                                 }
@@ -697,7 +695,7 @@ fun RezonaSearchScreen(
                 if (isSearchingRemote && remoteResults.isEmpty()) {
                     item(key = "searching_state") {
                         Box(modifier = Modifier.fillMaxWidth().padding(28.dp), contentAlignment = Alignment.Center) {
-                            Text("Searching YouTube Music for \"$debouncedQuery\"...", style = Typography.bodyMedium, color = SmokySilver)
+                            Text("Scanning frequencies for \"$debouncedQuery\"...", style = Typography.bodyMedium, color = SmokySilver)
                         }
                     }
                 } else if (remoteResults.isEmpty() && searchError != null) {
@@ -713,11 +711,80 @@ fun RezonaSearchScreen(
                             }
                         }
                     }
-                } else {
-                    itemsIndexed(remoteResults, key = { idx, t -> "sr_${t.id}_$idx" }) { idx, track ->
-                        V2SearchResultRow(
+                } else if (remoteResults.isNotEmpty()) {
+                    val topMatch = remoteResults.first()
+                    item(key = "top_match_hero_${topMatch.id}") {
+                        RezonaGlassCard(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 20.dp)
+                                .clickable {
+                                    scope.launch { libraryRepo.saveSearchQuery(debouncedQuery) }
+                                    onTrackSelected(topMatch)
+                                },
+                            shape = RoundedCornerShape(24.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(14.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                RezonaAsyncCoverArt(
+                                    coverArtUrl = topMatch.coverArtUrl,
+                                    fallbackIndex = topMatch.index,
+                                    shape = RoundedCornerShape(16.dp),
+                                    modifier = Modifier
+                                        .size(72.dp)
+                                        .border(1.dp, SpecularCardBorder, RoundedCornerShape(16.dp))
+                                )
+                                Spacer(modifier = Modifier.width(14.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = "Top Match",
+                                        style = Typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                        color = SoftSilver
+                                    )
+                                    Text(
+                                        text = topMatch.title,
+                                        style = Typography.titleLarge.copy(fontSize = 17.sp, fontWeight = FontWeight.ExtraBold),
+                                        color = PureWhite,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = topMatch.artist,
+                                        style = Typography.bodySmall,
+                                        color = SmokySilver,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                }
+                                Box(
+                                    modifier = Modifier
+                                        .size(42.dp)
+                                        .clip(CircleShape)
+                                        .background(PureWhite)
+                                        .clickable {
+                                            scope.launch { libraryRepo.saveSearchQuery(debouncedQuery) }
+                                            onTrackSelected(topMatch)
+                                        },
+                                    contentAlignment = Alignment.Center
+                                ) {
+                                    Icon(
+                                        painter = painterResource(id = R.drawable.ic_play_arrow),
+                                        contentDescription = "Play Top Match",
+                                        tint = Color(0xFF07090D),
+                                        modifier = Modifier.size(19.dp)
+                                    )
+                                }
+                            }
+                        }
+                    }
+
+                    itemsIndexed(remoteResults.drop(1), key = { idx, t -> "sr_${t.id}_$idx" }) { _, track ->
+                        FrostedResultRow(
                             track = track,
-                            isFirstRow = idx == 0,
                             onPlay = {
                                 scope.launch { libraryRepo.saveSearchQuery(debouncedQuery) }
                                 onTrackSelected(track)
@@ -731,7 +798,7 @@ fun RezonaSearchScreen(
                 if (isLoadingMore) {
                     item(key = "loading_more_continuation") {
                         Box(modifier = Modifier.fillMaxWidth().padding(16.dp), contentAlignment = Alignment.Center) {
-                            Text("Loading more results...", style = Typography.bodySmall, color = SmokySilver)
+                            Text("Loading more tracks...", style = Typography.bodySmall, color = SmokySilver)
                         }
                     }
                 }
@@ -749,42 +816,6 @@ fun RezonaSearchScreen(
                     )
                 )
         )
-
-        // ── FLOATING GLASS VOICE SEARCH MIC BUTTON ───────────────────────────
-        val hasTrack = controller.currentTrack.value != null
-        val bottomMicOffset = when {
-            isNavFolded -> 78.dp
-            hasTrack -> 160.dp
-            else -> 104.dp
-        }
-        GlassSurface(
-            variant = GlassSurfaceVariant.Floating,
-            modifier = Modifier
-                .align(Alignment.BottomEnd)
-                .padding(end = 18.dp, bottom = bottomMicOffset)
-                .size(52.dp),
-            shape = CircleShape,
-            onClick = {
-                val started = runCatching {
-                    val intent = Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).apply {
-                        putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, RecognizerIntent.LANGUAGE_MODEL_FREE_FORM)
-                        putExtra(RecognizerIntent.EXTRA_PROMPT, "Speak a song, artist, or lyrics...")
-                    }
-                    voiceLauncher.launch(intent)
-                    true
-                }.getOrDefault(false)
-                if (!started) {
-                    Toast.makeText(context, "Voice recognition not available on this device", Toast.LENGTH_SHORT).show()
-                }
-            }
-        ) {
-            Icon(
-                painter = painterResource(id = R.drawable.ic_mic),
-                contentDescription = "Voice Search",
-                tint = PureWhite,
-                modifier = Modifier.size(22.dp)
-            )
-        }
     }
 
     if (menuTrack != null) {
@@ -803,116 +834,139 @@ fun RezonaSearchScreen(
 }
 
 @Composable
-private fun SegmentedOption(
+private fun ModeChip(
     label: String,
-    isSelected: Boolean,
-    onClick: () -> Unit,
-    modifier: Modifier = Modifier
+    selected: Boolean,
+    onClick: () -> Unit
 ) {
-    val shape = RoundedCornerShape(21.dp)
     Box(
-        modifier = modifier
-            .fillMaxSize()
-            .clip(shape)
+        modifier = Modifier
+            .height(32.dp)
+            .clip(CircleShape)
             .then(
-                if (isSelected) {
+                if (selected) {
                     Modifier
-                        .background(Brush.verticalGradient(listOf(Color(0x36FFFFFF), Color(0x16FFFFFF))))
-                        .border(0.75.dp, Color(0x52FFFFFF), shape)
+                        .background(Color(0x33FFFFFF))
+                        .border(0.75.dp, Color(0x55FFFFFF), CircleShape)
                 } else Modifier
             )
-            .clickable(onClick = onClick),
+            .clickable(onClick = onClick)
+            .padding(horizontal = 13.dp),
         contentAlignment = Alignment.Center
     ) {
         Text(
             text = label,
-            style = Typography.labelLarge.copy(
-                fontSize = 13.sp,
-                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+            style = Typography.labelMedium.copy(
+                fontSize = 12.sp,
+                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
             ),
-            color = if (isSelected) PureWhite else SoftSilver
+            color = if (selected) PureWhite else SoftSilver
         )
     }
 }
 
-/**
- * Unboxed plain result row (`56dp` cover, play overlay on first row, title, artist, 3-dot icon, NO source badge).
- */
 @Composable
-private fun V2SearchResultRow(
+private fun TerritoryBentoTile(
+    title: String,
+    subtitle: String,
+    patternIdx: Int,
+    heightDp: Int,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    GlassSurface(
+        variant = GlassSurfaceVariant.Card,
+        modifier = modifier.height(heightDp.dp),
+        shape = RoundedCornerShape(22.dp),
+        onClick = onClick
+    ) {
+        Box(modifier = Modifier.fillMaxSize()) {
+            GenerativeMoodPattern(
+                index = patternIdx,
+                modifier = Modifier
+                    .fillMaxSize()
+                    .alpha(0.36f)
+            )
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomStart)
+                    .padding(14.dp)
+            ) {
+                Text(
+                    text = title,
+                    style = Typography.titleMedium.copy(fontSize = 15.5.sp, fontWeight = FontWeight.ExtraBold),
+                    color = PureWhite,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = subtitle,
+                    style = Typography.bodySmall.copy(fontSize = 11.sp),
+                    color = SoftSilver,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun FrostedResultRow(
     track: RezonaTrack,
-    isFirstRow: Boolean,
     onPlay: () -> Unit,
     onMoreClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
-    Row(
-        modifier = modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(10.dp))
-            .clickable(onClick = onPlay)
-            .padding(vertical = 4.dp),
-        verticalAlignment = Alignment.CenterVertically
+    GlassSurface(
+        variant = GlassSurfaceVariant.Button,
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(18.dp),
+        onClick = onPlay
     ) {
-        Box(modifier = Modifier.size(56.dp)) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
             RezonaAsyncCoverArt(
                 coverArtUrl = track.coverArtUrl,
                 fallbackIndex = track.index,
-                shape = RoundedCornerShape(10.dp),
-                modifier = Modifier.fillMaxSize()
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.size(50.dp)
             )
-            if (isFirstRow) {
-                Box(
-                    modifier = Modifier
-                        .align(Alignment.BottomEnd)
-                        .padding(4.dp)
-                        .size(22.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xB8000000)),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        painter = painterResource(id = R.drawable.ic_play_arrow),
-                        contentDescription = null,
-                        tint = PureWhite,
-                        modifier = Modifier.size(13.dp)
-                    )
-                }
+            Spacer(modifier = Modifier.width(12.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    text = track.title,
+                    style = Typography.titleMedium.copy(fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold),
+                    color = PureWhite,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = track.artist,
+                    style = Typography.bodySmall.copy(fontSize = 12.sp),
+                    color = SmokySilver,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
             }
-        }
-
-        Spacer(modifier = Modifier.width(12.dp))
-
-        Column(modifier = Modifier.weight(1f)) {
-            Text(
-                text = track.title,
-                style = Typography.titleMedium.copy(fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold),
-                color = PearlWhite,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = track.artist,
-                style = Typography.bodySmall.copy(fontSize = 12.5.sp),
-                color = SmokySilver,
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-        }
-
-        Box(
-            modifier = Modifier
-                .size(44.dp)
-                .clip(CircleShape)
-                .clickable(onClick = onMoreClick),
-            contentAlignment = Alignment.Center
-        ) {
-            Icon(
-                painter = painterResource(id = R.drawable.ic_more_vert),
-                contentDescription = "Track Options",
-                tint = SoftSilver,
-                modifier = Modifier.size(19.dp)
-            )
+            Box(
+                modifier = Modifier
+                    .size(40.dp)
+                    .clip(CircleShape)
+                    .clickable(onClick = onMoreClick),
+                contentAlignment = Alignment.Center
+            ) {
+                Icon(
+                    painter = painterResource(id = R.drawable.ic_more_vert),
+                    contentDescription = "Track Options",
+                    tint = SoftSilver,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
         }
     }
 }

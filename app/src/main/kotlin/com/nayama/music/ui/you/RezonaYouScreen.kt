@@ -59,6 +59,8 @@ import com.nayama.music.data.repository.toRezonaTrack
 import com.nayama.music.navigation.RezonaFeatureFlags
 import com.nayama.music.playback.RezonaPlayerController
 import com.nayama.music.sync.RezonaCloudSyncManager
+import com.nayama.music.ui.components.GlassSurface
+import com.nayama.music.ui.components.GlassSurfaceVariant
 import com.nayama.music.ui.components.LocalRezonaHazeState
 import com.nayama.music.ui.components.RezonaAsyncCoverArt
 import com.nayama.music.ui.components.RezonaEqualizerModalSheet
@@ -69,7 +71,6 @@ import com.nayama.music.ui.components.RezonaGlassPill
 import com.nayama.music.ui.components.RezonaGlassTextField
 import com.nayama.music.ui.components.RezonaHairlineDivider
 import com.nayama.music.ui.components.rezonaHazeSource
-import kotlinx.coroutines.launch
 import com.nayama.music.ui.library.RezonaBackupSheet
 import com.nayama.music.ui.screens.rememberAutoFoldNestedScrollConnection
 import com.nayama.music.ui.theme.PearlWhite
@@ -78,14 +79,13 @@ import com.nayama.music.ui.theme.SmokySilver
 import com.nayama.music.ui.theme.SoftSilver
 import com.nayama.music.ui.theme.SpecularCardBorder
 import com.nayama.music.ui.theme.Typography
+import kotlinx.coroutines.launch
 
 /**
- * Stage H: YOU Tab
- * - Account card (Guest state, NO login, NO streak)
- * - Grouped plain rows with hairline separators:
- *   History, Stats and Recap, Listen together (stub), Equalizer, Sound Lab (feature flag),
- *   and direct Settings categories: Sound and playback, Appearance, Language and content,
- *   Lyrics and translation, Privacy and history, Storage, Backup and import, About
+ * Rezona Original Sonic Passport & Studio Console ("You" Tab):
+ * - Hero Sonic Passport Card with Cloud Sync Pill + Live 3-Column Telemetry Strip (Liked · Spins · Time Listened)
+ * - 2x2 Tactile Studio Bento Console (Stats & Recap · History · 5-Band EQ · Sound Lab / Backup)
+ * - Frosted Preferences Console Card housing Sound, Appearance & Dynamic Island, Lyrics, Privacy, Storage, Sync, About
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -125,8 +125,24 @@ fun RezonaYouScreen(
     var deleteError by remember { mutableStateOf<String?>(null) }
     var isAccountBusy by remember { mutableStateOf(false) }
 
+    val durationSecById = remember(historyEntities, mostPlayedEntities) {
+        (historyEntities + mostPlayedEntities).associate { entity ->
+            val sec = (entity.durationMs / 1000L).takeIf { it > 0L } ?: 210L
+            entity.id to sec
+        }
+    }
+    val totalListenMins = remember(historyEntries, durationSecById) {
+        val sec = historyEntries.sumOf { durationSecById[it.trackId] ?: 210L }
+        (sec / 60L).coerceAtLeast(0L)
+    }
+    val listenSummaryShort = remember(totalListenMins) {
+        val h = totalListenMins / 60L
+        val m = totalListenMins % 60L
+        if (h > 0L) "${h}h ${m}m" else "${m}m"
+    }
+
     val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
-    val bottomPad = if (controller.currentTrack.value != null) 168.dp else 108.dp
+    val bottomPad = if (controller.currentTrack.value != null) 172.dp else 112.dp
 
     Box(modifier = modifier.fillMaxSize()) {
         LazyColumn(
@@ -135,27 +151,51 @@ fun RezonaYouScreen(
                 .nestedScroll(scrollConnection)
                 .rezonaHazeSource(hazeState),
             contentPadding = PaddingValues(start = 20.dp, end = 20.dp, top = statusTop + 14.dp, bottom = bottomPad),
-            verticalArrangement = Arrangement.spacedBy(20.dp)
+            verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
-            item(key = "you_header") {
-                Text(
-                    text = "You",
-                    style = Typography.displayLarge.copy(fontSize = 28.sp, fontWeight = FontWeight.Bold),
-                    color = PureWhite
-                )
+            // ── 1. PASSPORT MASTHEAD ─────────────────────────────────────────
+            item(key = "you_masthead") {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Column {
+                        Text(
+                            text = "Passport",
+                            style = Typography.displayLarge.copy(
+                                fontSize = 30.sp,
+                                fontWeight = FontWeight.ExtraBold,
+                                letterSpacing = (-0.5).sp
+                            ),
+                            color = PureWhite
+                        )
+                        Text(
+                            text = "Listener identity, telemetry & audio tuning",
+                            style = Typography.bodySmall.copy(fontSize = 12.sp),
+                            color = SoftSilver
+                        )
+                    }
+                    RezonaGlassPill(
+                        isActive = false,
+                        onClick = { onOpenSettingsSection(null) }
+                    ) {
+                        Text("Settings", style = Typography.labelMedium.copy(fontWeight = FontWeight.Bold), color = PearlWhite)
+                    }
+                }
             }
 
-            // Account Card (Firebase Authenticated User or Local Guest Mode)
-            item(key = "you_guest_card") {
+            // ── 2. SONIC PASSPORT CARD + LIVE 3-METRIC TELEMETRY STRIP ───────
+            item(key = "you_sonic_passport") {
                 val signedIn = authSession.isSignedIn && authSession.isEmailVerified
                 RezonaGlassCard(
                     modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(22.dp)
+                    shape = RoundedCornerShape(28.dp)
                 ) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(16.dp),
+                            .padding(18.dp),
                         verticalArrangement = Arrangement.spacedBy(14.dp)
                     ) {
                         Row(
@@ -164,10 +204,10 @@ fun RezonaYouScreen(
                         ) {
                             Box(
                                 modifier = Modifier
-                                    .size(54.dp)
-                                    .clip(CircleShape)
+                                    .size(56.dp)
+                                    .clip(RoundedCornerShape(18.dp))
                                     .background(if (signedIn) Color(0x2EFFFFFF) else Color(0x1CFFFFFF))
-                                    .border(1.dp, SpecularCardBorder, CircleShape),
+                                    .border(1.dp, SpecularCardBorder, RoundedCornerShape(18.dp)),
                                 contentAlignment = Alignment.Center
                             ) {
                                 if (signedIn) {
@@ -176,7 +216,7 @@ fun RezonaYouScreen(
                                         ?: "R"
                                     Text(
                                         text = initial,
-                                        style = Typography.titleLarge.copy(fontSize = 22.sp, fontWeight = FontWeight.Bold),
+                                        style = Typography.titleLarge.copy(fontSize = 22.sp, fontWeight = FontWeight.ExtraBold),
                                         color = PureWhite
                                     )
                                 } else {
@@ -190,86 +230,71 @@ fun RezonaYouScreen(
                             Spacer(modifier = Modifier.width(14.dp))
                             Column(modifier = Modifier.weight(1f)) {
                                 Text(
-                                    text = if (signedIn) authSession.displayName else "Guest Listener",
-                                    style = Typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                                    text = if (signedIn) authSession.displayName else "Local Studio Guest",
+                                    style = Typography.titleLarge.copy(fontSize = 18.sp, fontWeight = FontWeight.ExtraBold),
                                     color = PureWhite,
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
                                 Text(
-                                    text = if (signedIn) {
-                                        "${authSession.email} · ${authSession.providerLabel}"
-                                    } else {
-                                        "Local-only library · $likedCount liked · Cloud sync off"
-                                    },
-                                    style = Typography.bodySmall,
+                                    text = if (signedIn) authSession.email else "Sign in to sync likes & crates across phones",
+                                    style = Typography.bodySmall.copy(fontSize = 12.sp),
                                     color = SmokySilver,
-                                    maxLines = 2,
+                                    maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .clip(CircleShape)
+                                    .background(if (signedIn) Color(0x28FFFFFF) else Color(0x14FFFFFF))
+                                    .border(0.75.dp, SpecularCardBorder, CircleShape)
+                                    .clickable {
+                                        if (signedIn) onOpenSettingsSection("Sync") else onOpenAuth()
+                                    }
+                                    .padding(horizontal = 10.dp, vertical = 5.dp)
+                            ) {
+                                Text(
+                                    text = if (signedIn) "Cloud Synced" else "Guest",
+                                    style = Typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = PureWhite
                                 )
                             }
                         }
 
-                        RezonaHairlineDivider()
+                        // 3-Column Live Telemetry Strip inside Passport Card
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(18.dp))
+                                .background(Color(0x14FFFFFF))
+                                .border(0.75.dp, Color(0x26FFFFFF), RoundedCornerShape(18.dp))
+                                .clickable { showRecapSheet = true }
+                                .padding(vertical = 12.dp),
+                            horizontalArrangement = Arrangement.SpaceEvenly,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            PassportMetricCell(value = "$likedCount", label = "Liked")
+                            PassportMetricCell(value = "${historyEntries.size}", label = "Total Spins")
+                            PassportMetricCell(value = listenSummaryShort, label = "Listened")
+                        }
 
                         if (signedIn) {
-                            Row(
-                                modifier = Modifier.fillMaxWidth(),
-                                horizontalArrangement = Arrangement.SpaceBetween,
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = if (syncStatus.pendingOpsCount > 0) {
-                                            "Pending upload: ${syncStatus.pendingOpsCount} ops"
-                                        } else {
-                                            "$likedCount liked · Cloud synced"
-                                        },
-                                        style = Typography.bodySmall,
-                                        color = SoftSilver
-                                    )
-                                    Text(
-                                        text = "UID: ${authSession.uid?.take(10).orEmpty()}...",
-                                        style = Typography.labelSmall,
-                                        color = SmokySilver
-                                    )
-                                }
-                                RezonaGlassPill(
-                                    isActive = false,
-                                    onClick = { onOpenSettingsSection("Sync") },
-                                    modifier = Modifier.heightIn(min = 48.dp)
-                                ) {
-                                    Text(
-                                        text = "Sync status",
-                                        style = Typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                                        color = PearlWhite
-                                    )
-                                }
-                            }
-
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.spacedBy(10.dp)
                             ) {
                                 RezonaGlassButton(
+                                    text = "Sync Status",
+                                    isPrimary = true,
+                                    onClick = { onOpenSettingsSection("Sync") },
+                                    modifier = Modifier.weight(1f).heightIn(min = 46.dp)
+                                )
+                                RezonaGlassButton(
                                     text = "Sign out",
                                     isPrimary = false,
                                     onClick = { showSignOutDialog = true },
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .heightIn(min = 48.dp)
-                                )
-                                RezonaGlassButton(
-                                    text = "Delete account",
-                                    isPrimary = false,
-                                    onClick = {
-                                        deletePassword = ""
-                                        deleteError = null
-                                        showDeleteAccountDialog = true
-                                    },
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .heightIn(min = 48.dp)
+                                    modifier = Modifier.weight(1f).heightIn(min = 46.dp)
                                 )
                             }
                         } else {
@@ -281,12 +306,10 @@ fun RezonaYouScreen(
                                 RezonaGlassPill(
                                     isActive = false,
                                     onClick = onOpenAuth,
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .heightIn(min = 48.dp)
+                                    modifier = Modifier.weight(1f).heightIn(min = 46.dp)
                                 ) {
                                     Text(
-                                        text = "Sign in / Create Account",
+                                        text = "Email Account",
                                         style = Typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
                                         color = PearlWhite,
                                         maxLines = 1
@@ -313,10 +336,10 @@ fun RezonaYouScreen(
                                             isAccountBusy = false
                                         }
                                     },
-                                    modifier = Modifier.heightIn(min = 48.dp)
+                                    modifier = Modifier.weight(1f).heightIn(min = 46.dp)
                                 ) {
                                     Text(
-                                        text = if (isAccountBusy) "..." else "G  Google",
+                                        text = if (isAccountBusy) "Connecting..." else "Google Sign-In",
                                         style = Typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                                         color = PureWhite
                                     )
@@ -327,85 +350,111 @@ fun RezonaYouScreen(
                 }
             }
 
-        // Personal Listening Group (Plain grouped rows)
-        item(key = "you_personal_group") {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                Text(
-                    text = "LISTENING & AUDIO",
-                    style = Typography.labelSmall.copy(letterSpacing = 1.1.sp, fontWeight = FontWeight.Bold),
-                    color = SoftSilver,
-                    modifier = Modifier.padding(bottom = 6.dp)
-                )
-                YouPlainRow(R.drawable.ic_history, "History", "${historyEntities.size} recent tracks") {
-                    showHistorySheet = true
-                }
-                RezonaHairlineDivider(startIndent = 38.dp)
-                YouPlainRow(R.drawable.ic_stats, "Stats and Recap", "Local listening totals & top tracks") {
-                    showRecapSheet = true
-                }
-                RezonaHairlineDivider(startIndent = 38.dp)
-                YouPlainRow(R.drawable.ic_community, "Listen together", "Coming soon") {
-                    showListenTogetherStub = true
-                }
-                RezonaHairlineDivider(startIndent = 38.dp)
-                YouPlainRow(R.drawable.ic_equalizer, "Equalizer", "5-band EQ & presets") {
-                    showEqualizerSheet = true
-                }
-                if (RezonaFeatureFlags.ENABLE_STUDIO_IN_YOU) {
-                    RezonaHairlineDivider(startIndent = 38.dp)
-                    YouPlainRow(R.drawable.ic_rezona_studio, "Sound Lab", "Mood Dial, Focus Rooms & Sound Check") {
-                        onOpenSoundLab()
+            // ── 3. 2x2 STUDIO CONSOLE BENTO GRID ─────────────────────────────
+            item(key = "you_studio_bento") {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "Studio Console",
+                        style = Typography.titleMedium.copy(fontSize = 17.sp, fontWeight = FontWeight.ExtraBold),
+                        color = PureWhite
+                    )
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        StudioBentoTile(
+                            iconRes = R.drawable.ic_stats,
+                            title = "Stats & Recap",
+                            subtitle = "${historyEntries.size} plays · $listenSummaryShort",
+                            onClick = { showRecapSheet = true },
+                            modifier = Modifier.weight(1f)
+                        )
+                        StudioBentoTile(
+                            iconRes = R.drawable.ic_history,
+                            title = "Play History",
+                            subtitle = "${historyEntities.size} recent tracks",
+                            onClick = { showHistorySheet = true },
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        StudioBentoTile(
+                            iconRes = R.drawable.ic_equalizer,
+                            title = "Equalizer",
+                            subtitle = "5-band EQ & bass boost",
+                            onClick = { showEqualizerSheet = true },
+                            modifier = Modifier.weight(1f)
+                        )
+                        StudioBentoTile(
+                            iconRes = if (RezonaFeatureFlags.ENABLE_STUDIO_IN_YOU) R.drawable.ic_rezona_studio else R.drawable.ic_playlist_add,
+                            title = if (RezonaFeatureFlags.ENABLE_STUDIO_IN_YOU) "Sound Lab" else "Backup & Import",
+                            subtitle = if (RezonaFeatureFlags.ENABLE_STUDIO_IN_YOU) "Mood dial & focus rooms" else "M3U, CSV & JSON",
+                            onClick = {
+                                if (RezonaFeatureFlags.ENABLE_STUDIO_IN_YOU) onOpenSoundLab() else showBackupSheet = true
+                            },
+                            modifier = Modifier.weight(1f)
+                        )
                     }
                 }
             }
-        }
 
-        // Settings Group (Plain grouped rows)
-        item(key = "you_settings_group") {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                Text(
-                    text = "SETTINGS",
-                    style = Typography.labelSmall.copy(letterSpacing = 1.1.sp, fontWeight = FontWeight.Bold),
-                    color = SoftSilver,
-                    modifier = Modifier.padding(bottom = 6.dp)
-                )
-                YouPlainRow(R.drawable.ic_tune, "Sound and playback", "Quality, crossfade, gapless, scrubber") {
-                    onOpenSettingsSection("Sound")
-                }
-                RezonaHairlineDivider(startIndent = 38.dp)
-                YouPlainRow(R.drawable.ic_ambient, "Appearance", "Liquid Glass intensity, ambient mode, dock") {
-                    onOpenSettingsSection("Appearance")
-                }
-                RezonaHairlineDivider(startIndent = 38.dp)
-                YouPlainRow(R.drawable.ic_rezona_home, "Language and content", "English UI · YouTube Music region") {
-                    onOpenSettingsSection("Language")
-                }
-                RezonaHairlineDivider(startIndent = 38.dp)
-                YouPlainRow(R.drawable.ic_lyrics, "Lyrics and translation", "LRCLIB, YouTube Music fallback, translation") {
-                    onOpenSettingsSection("Lyrics")
-                }
-                RezonaHairlineDivider(startIndent = 38.dp)
-                YouPlainRow(R.drawable.ic_pin, "Privacy and history", "Pause listening & search history") {
-                    onOpenSettingsSection("Privacy")
-                }
-                RezonaHairlineDivider(startIndent = 38.dp)
-                YouPlainRow(R.drawable.ic_cloud_done, "Storage", "Playback & image cache sliders, offline files") {
-                    onOpenSettingsSection("Storage")
-                }
-                RezonaHairlineDivider(startIndent = 38.dp)
-                YouPlainRow(R.drawable.ic_playlist_add, "Backup and import", "M3U, CSV, YouTube Music link & JSON backup") {
-                    showBackupSheet = true
-                }
-                RezonaHairlineDivider(startIndent = 38.dp)
-                YouPlainRow(R.drawable.ic_cloud_done, "Cloud sync & status", "UID, queued ops, push/pull & force restore") {
-                    onOpenSettingsSection("Sync")
-                }
-                RezonaHairlineDivider(startIndent = 38.dp)
-                YouPlainRow(R.drawable.ic_info, "About", "Diagnostics, Glass Gallery & Open-source licenses") {
-                    onOpenSettingsSection("About")
+            // ── 4. PREFERENCES DECK CARD ─────────────────────────────────────
+            item(key = "you_preferences_deck") {
+                val signedIn = authSession.isSignedIn && authSession.isEmailVerified
+                RezonaGlassCard(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = RoundedCornerShape(24.dp)
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 10.dp)
+                    ) {
+                        ConsolePreferenceRow(R.drawable.ic_tune, "Sound & Playback", "Quality, crossfade, gapless, SponsorBlock") {
+                            onOpenSettingsSection("Sound")
+                        }
+                        RezonaHairlineDivider(startIndent = 38.dp)
+                        ConsolePreferenceRow(R.drawable.ic_ambient, "Appearance & Dynamic Island", "Liquid Glass blur, cutout placement & dock") {
+                            onOpenSettingsSection("Appearance")
+                        }
+                        RezonaHairlineDivider(startIndent = 38.dp)
+                        ConsolePreferenceRow(R.drawable.ic_lyrics, "Lyrics & Translation", "LRCLIB synced lyrics, fonts & live translate") {
+                            onOpenSettingsSection("Lyrics")
+                        }
+                        RezonaHairlineDivider(startIndent = 38.dp)
+                        ConsolePreferenceRow(R.drawable.ic_playlist_add, "Backup & Playlist Import", "M3U, CSV, YouTube Music link & JSON") {
+                            showBackupSheet = true
+                        }
+                        RezonaHairlineDivider(startIndent = 38.dp)
+                        ConsolePreferenceRow(R.drawable.ic_cloud_done, "Storage & Offline Cache", "Audio & cover cache limits") {
+                            onOpenSettingsSection("Storage")
+                        }
+                        RezonaHairlineDivider(startIndent = 38.dp)
+                        ConsolePreferenceRow(R.drawable.ic_pin, "Privacy & History", "Pause listening & search history") {
+                            onOpenSettingsSection("Privacy")
+                        }
+                        RezonaHairlineDivider(startIndent = 38.dp)
+                        ConsolePreferenceRow(R.drawable.ic_community, "Listen Together", "Shared room status") {
+                            showListenTogetherStub = true
+                        }
+                        RezonaHairlineDivider(startIndent = 38.dp)
+                        ConsolePreferenceRow(R.drawable.ic_info, "About Rezona", "Version, diagnostics & open-source licenses") {
+                            onOpenSettingsSection("About")
+                        }
+                        if (signedIn) {
+                            RezonaHairlineDivider(startIndent = 38.dp)
+                            ConsolePreferenceRow(R.drawable.ic_delete, "Delete Account", "Permanently wipe cloud & local account") {
+                                deletePassword = ""
+                                deleteError = null
+                                showDeleteAccountDialog = true
+                            }
+                        }
+                    }
                 }
             }
-        }
         }
 
         Box(
@@ -445,9 +494,7 @@ fun RezonaYouScreen(
                             Toast.makeText(context, "Signed out (local library kept)", Toast.LENGTH_SHORT).show()
                         }
                     },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 48.dp)
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
                 )
                 RezonaGlassButton(
                     text = "Clear Local Data",
@@ -461,17 +508,13 @@ fun RezonaYouScreen(
                             Toast.makeText(context, "Signed out and local data cleared", Toast.LENGTH_SHORT).show()
                         }
                     },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 48.dp)
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
                 )
                 RezonaGlassButton(
                     text = "Cancel",
                     isPrimary = false,
                     onClick = { showSignOutDialog = false },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .heightIn(min = 48.dp)
+                    modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp)
                 )
             }
         }
@@ -563,7 +606,7 @@ fun RezonaYouScreen(
         ModalBottomSheet(
             onDismissRequest = { showHistorySheet = false },
             sheetState = sheetState,
-            containerColor = Color(0xEC101218),
+            containerColor = Color(0xF2101218),
             scrimColor = Color(0x88000000)
         ) {
             Column(modifier = Modifier.fillMaxWidth().height(500.dp).padding(horizontal = 20.dp)) {
@@ -611,19 +654,6 @@ fun RezonaYouScreen(
         val playCountByTrack = remember(historyEntries) {
             historyEntries.groupingBy { it.trackId }.eachCount()
         }
-        val durationSecById = remember(historyEntities, mostPlayedEntities) {
-            (historyEntities + mostPlayedEntities).associate { entity ->
-                val sec = (entity.durationMs / 1000L).takeIf { it > 0L } ?: 210L
-                entity.id to sec
-            }
-        }
-        val totalListenSec = historyEntries.sumOf { entry ->
-            durationSecById[entry.trackId] ?: 210L
-        }
-        val totalMins = (totalListenSec / 60L).coerceAtLeast(0L)
-        val hours = totalMins / 60L
-        val remMins = totalMins % 60L
-        val listenTimeLabel = if (hours > 0L) "${hours}h ${remMins}m" else "${remMins}m"
 
         RezonaGlassDialog(
             title = "Stats & Recap",
@@ -633,7 +663,7 @@ fun RezonaYouScreen(
             dismissText = null
         ) {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                Text("$totalPlays total plays · $listenTimeLabel listened", style = Typography.bodyMedium.copy(fontWeight = FontWeight.Bold), color = PureWhite)
+                Text("$totalPlays total plays · $listenSummaryShort listened", style = Typography.bodyMedium.copy(fontWeight = FontWeight.Bold), color = PureWhite)
                 RezonaHairlineDivider()
                 Text("Top Tracks (Plays & Time)", style = Typography.labelMedium, color = SoftSilver)
                 if (topTracks.isEmpty()) {
@@ -664,7 +694,7 @@ fun RezonaYouScreen(
             dismissText = null
         ) {
             Text(
-                text = "Peer-to-peer listening sessions are marked Coming Soon. Rezona runs strictly on-device with zero external account server.",
+                text = "Shared room playback is coming in a future update.",
                 style = Typography.bodyMedium,
                 color = SoftSilver
             )
@@ -684,37 +714,110 @@ fun RezonaYouScreen(
 }
 
 @Composable
-private fun YouPlainRow(
+private fun PassportMetricCell(
+    value: String,
+    label: String
+) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+        Text(
+            text = value,
+            style = Typography.titleLarge.copy(fontSize = 18.sp, fontWeight = FontWeight.ExtraBold),
+            color = PureWhite
+        )
+        Text(
+            text = label,
+            style = Typography.labelSmall.copy(fontSize = 11.sp),
+            color = SoftSilver
+        )
+    }
+}
+
+@Composable
+private fun StudioBentoTile(
     iconRes: Int,
     title: String,
-    description: String?,
+    subtitle: String,
+    onClick: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    GlassSurface(
+        variant = GlassSurfaceVariant.Card,
+        modifier = modifier.height(88.dp),
+        shape = RoundedCornerShape(22.dp),
+        onClick = onClick
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxSize()
+                .padding(14.dp),
+            verticalArrangement = Arrangement.SpaceBetween
+        ) {
+            Icon(
+                painter = painterResource(id = iconRes),
+                contentDescription = null,
+                tint = PureWhite,
+                modifier = Modifier.size(20.dp)
+            )
+            Column {
+                Text(
+                    text = title,
+                    style = Typography.titleMedium.copy(fontSize = 14.sp, fontWeight = FontWeight.Bold),
+                    color = PureWhite,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+                Text(
+                    text = subtitle,
+                    style = Typography.bodySmall.copy(fontSize = 11.sp),
+                    color = SmokySilver,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun ConsolePreferenceRow(
+    iconRes: Int,
+    title: String,
+    subtitle: String,
     onClick: () -> Unit
 ) {
     Row(
         modifier = Modifier
             .fillMaxWidth()
             .clickable(onClick = onClick)
-            .padding(vertical = 13.dp),
+            .padding(vertical = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
         Icon(
             painter = painterResource(id = iconRes),
             contentDescription = null,
-            tint = PureWhite,
-            modifier = Modifier.size(21.dp)
+            tint = PearlWhite,
+            modifier = Modifier.size(20.dp)
         )
         Spacer(modifier = Modifier.width(16.dp))
         Column(modifier = Modifier.weight(1f)) {
-            Text(text = title, style = Typography.titleMedium.copy(fontWeight = FontWeight.Medium), color = PearlWhite)
-            if (!description.isNullOrBlank()) {
-                Text(text = description, style = Typography.bodySmall, color = SmokySilver)
-            }
+            Text(
+                text = title,
+                style = Typography.titleMedium.copy(fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold),
+                color = PureWhite
+            )
+            Text(
+                text = subtitle,
+                style = Typography.bodySmall.copy(fontSize = 11.5.sp),
+                color = SmokySilver,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
         }
         Icon(
             painter = painterResource(id = R.drawable.ic_chevron_right),
             contentDescription = null,
             tint = SoftSilver,
-            modifier = Modifier.size(18.dp)
+            modifier = Modifier.size(17.dp)
         )
     }
 }

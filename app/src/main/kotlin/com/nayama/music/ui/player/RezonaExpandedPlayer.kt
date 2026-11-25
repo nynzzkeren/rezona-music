@@ -247,59 +247,61 @@ fun RezonaExpandedPlayer(
                     modifier = Modifier.fillMaxSize()
                 )
 
-                // ── 2. FULL-BLEED COVER (y = 0, height ~1.25x screenWidth, DstIn Alpha Mask) ─
+                // ── 2. AMBIENT RADIAL HALO BEHIND PRISM SLEEVE (NO FULL-BLEED CROP) ─
                 if (!isLyricsMode && !isVideoMode) {
-                    BoxWithConstraints(modifier = Modifier.fillMaxSize()) {
-                        val coverHeight = (maxWidth * 1.25f).coerceAtMost(maxHeight * 0.64f)
-                        Crossfade(
-                            targetState = track.coverArtUrl.ifBlank { "idx_${track.index}" },
-                            animationSpec = tween(durationMillis = 700, easing = FastOutSlowInEasing),
-                            label = "cover_blend_crossfade",
-                            modifier = Modifier
-                                .fillMaxWidth()
-                                .height(coverHeight)
-                                .align(Alignment.TopCenter)
-                        ) { _ ->
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxSize()
-                                    .graphicsLayer {
-                                        compositingStrategy = CompositingStrategy.Offscreen
-                                    }
-                                    .drawWithContent {
-                                        drawContent()
-                                        // Smooth cubic-eased alpha mask over lower ~42% -> dissolves seamlessly into ambientBase
-                                        drawRect(
-                                            brush = Brush.verticalGradient(
-                                                0.00f to Color.White,
-                                                0.54f to Color.White,
-                                                0.66f to Color.White.copy(alpha = 0.86f),
-                                                0.78f to Color.White.copy(alpha = 0.48f),
-                                                0.90f to Color.White.copy(alpha = 0.14f),
-                                                1.00f to Color.Transparent
-                                            ),
-                                            blendMode = BlendMode.DstIn
-                                        )
-                                    }
-                            ) {
-                                RezonaAsyncCoverArt(
-                                    coverArtUrl = track.coverArtUrl,
-                                    fallbackIndex = track.index,
-                                    shape = RoundedCornerShape(0.dp),
-                                    modifier = Modifier.fillMaxSize()
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .fillMaxHeight(0.56f)
+                            .align(Alignment.TopCenter)
+                            .background(
+                                Brush.radialGradient(
+                                    colors = listOf(
+                                        artworkPalette.primaryAmbient.copy(alpha = 0.42f),
+                                        artworkPalette.secondaryAmbient.copy(alpha = 0.18f),
+                                        Color.Transparent
+                                    ),
+                                    radius = 680f
                                 )
-                            }
-                        }
-                    }
+                            )
+                    )
                 }
 
-                // ── 3. MAIN COLUMN (TOP CONTENT + SHARED BOTTOM CONTROL DECK) ────
+                // ── 3. MAIN STUDIO COLUMN (TOP MODE BAR + STAGE + STUDIO CONSOLE) ─
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
+                        .statusBarsPadding()
                         .navigationBarsPadding(),
                     verticalArrangement = Arrangement.SpaceBetween
                 ) {
+                    // Top Studio Bar: Collapse Disc · 3-Way Mode Capsule (Sleeve | Video | Lyrics) · Queue & Menu Discs
+                    StudioTopModeBar(
+                        isLyricsMode = isLyricsMode,
+                        isVideoMode = isVideoMode,
+                        hasVideoStream = hasVideoStream,
+                        tintedGlass = artworkPalette.glassTint,
+                        onCollapse = onDismiss,
+                        onSelectMode = { mode ->
+                            when (mode) {
+                                "Lyrics" -> {
+                                    if (isVideoMode) controller.setVideoMode(false)
+                                    isLyricsMode = true
+                                }
+                                "Video" -> {
+                                    isLyricsMode = false
+                                    controller.setVideoMode(true)
+                                }
+                                else -> {
+                                    isLyricsMode = false
+                                    if (isVideoMode) controller.setVideoMode(false)
+                                }
+                            }
+                        },
+                        onOpenQueue = { showQueueSheet = true },
+                        onOpenMenu = { showTrackMenuSheet = true }
+                    )
+
                     AnimatedContent(
                         targetState = isLyricsMode,
                         transitionSpec = { fadeIn(tween(220)) togetherWith fadeOut(tween(180)) },
@@ -314,16 +316,19 @@ fun RezonaExpandedPlayer(
                                 modifier = Modifier.fillMaxSize()
                             )
                         } else {
-                            FullBleedCoverTopSection(
+                            val currentLyrics = controller.currentLyrics.value
+                            val activeLyricPreview = remember(currentLyrics, currentPosition) {
+                                if (currentLyrics.isEmpty()) null
+                                else currentLyrics.lastOrNull { it.timeMs <= currentPosition + 150L }?.text?.takeIf { it.isNotBlank() }
+                            }
+                            StudioPrismStageSection(
                                 track = track,
-                                queueName = controller.activeQueueName.value,
-                                isLiked = isLiked,
+                                isPlaying = isPlaying,
                                 palette = artworkPalette,
-                                hasVideoStream = hasVideoStream,
                                 isVideoMode = isVideoMode,
+                                activeLyricPreview = activeLyricPreview,
                                 exoPlayerProvider = { controller.getExoPlayer() },
-                                onToggleVideoMode = { enableVideo -> controller.setVideoMode(enableVideo) },
-                                onOpenQueue = { showQueueSheet = true },
+                                onOpenLyrics = { isLyricsMode = true },
                                 onDoubleTapLike = {
                                     controller.toggleLike()
                                     showHeartBurst = true
@@ -341,15 +346,16 @@ fun RezonaExpandedPlayer(
                                     if (dismissDragY > 180f) onDismiss()
                                     dismissDragY = 0f
                                 },
-                                onLikeClick = { controller.toggleLike() },
-                                onMenuClick = { showTrackMenuSheet = true },
                                 modifier = Modifier.fillMaxSize()
                             )
                         }
                     }
 
-                    // Bottom Shared Control Deck (Part 1 Tinted Glass + Part 2 4-Icon Bottom Pill)
-                    NowPlayingControlDeck(
+                    // Bottom Floating Liquid Glass Studio Console Card
+                    StudioConsoleControlDeck(
+                        track = track,
+                        queueName = controller.activeQueueName.value,
+                        isLiked = isLiked,
                         bars = bars,
                         scrubberStyle = scrubberStyle,
                         currentPositionMs = currentPosition,
@@ -363,6 +369,8 @@ fun RezonaExpandedPlayer(
                         isSoundSheetOpen = showSoundSheet,
                         sleepSecRemaining = sleepSecRemaining,
                         sleepEndOfTrack = sleepEndOfTrack,
+                        onOpenQueue = { showQueueSheet = true },
+                        onToggleLike = { controller.toggleLike() },
                         onSeekFraction = { controller.seekToFraction(it) },
                         onToggleShuffle = { controller.toggleShuffle() },
                         onSkipPrev = { controller.skipPrevious() },
@@ -502,300 +510,305 @@ fun RezonaExpandedPlayer(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// FULL-BLEED COVER TOP SECTION (`now_playing.jpg`)
+// REZONA STUDIO PRISM TOP BAR, SLEEVE STAGE & FLOATING CONSOLE DECK
 // ─────────────────────────────────────────────────────────────────────────────
+
+@Composable
+private fun StudioTopModeBar(
+    isLyricsMode: Boolean,
+    isVideoMode: Boolean,
+    hasVideoStream: Boolean,
+    tintedGlass: Color,
+    onCollapse: () -> Unit,
+    onSelectMode: (String) -> Unit,
+    onOpenQueue: () -> Unit,
+    onOpenMenu: () -> Unit
+) {
+    val activeMode = when {
+        isLyricsMode -> "Lyrics"
+        isVideoMode -> "Video"
+        else -> "Sleeve"
+    }
+    val modes = remember(hasVideoStream) {
+        if (hasVideoStream) listOf("Sleeve", "Video", "Lyrics") else listOf("Sleeve", "Lyrics")
+    }
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 18.dp, vertical = 10.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        GlassCircleIconButton(
+            iconRes = R.drawable.ic_expand_more,
+            tint = PureWhite,
+            contentDescription = "Minimize Player",
+            onClick = onCollapse,
+            sizeDp = 42
+        )
+
+        // Sculpted 3-Way Studio Mode Capsule
+        Row(
+            modifier = Modifier
+                .height(40.dp)
+                .clip(CircleShape)
+                .background(
+                    Brush.verticalGradient(
+                        listOf(
+                            lerp(tintedGlass, PureWhite, 0.14f).copy(alpha = 0.42f),
+                            tintedGlass.copy(alpha = 0.28f)
+                        )
+                    )
+                )
+                .border(1.dp, SpecularDockBorder, CircleShape)
+                .padding(3.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            modes.forEach { label ->
+                val selected = activeMode == label
+                Box(
+                    modifier = Modifier
+                        .height(34.dp)
+                        .clip(CircleShape)
+                        .then(
+                            if (selected) {
+                                Modifier
+                                    .background(Color(0x38FFFFFF))
+                                    .border(0.8.dp, Color(0x66FFFFFF), CircleShape)
+                            } else Modifier
+                        )
+                        .clickable { onSelectMode(label) }
+                        .padding(horizontal = 16.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = label,
+                        style = Typography.labelMedium.copy(
+                            fontSize = 12.5.sp,
+                            fontWeight = if (selected) FontWeight.ExtraBold else FontWeight.Medium
+                        ),
+                        color = if (selected) PureWhite else SoftSilver
+                    )
+                }
+            }
+        }
+
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            GlassCircleIconButton(
+                iconRes = R.drawable.ic_queue_music,
+                tint = PureWhite,
+                contentDescription = "Open Queue",
+                onClick = onOpenQueue,
+                sizeDp = 42
+            )
+            GlassCircleIconButton(
+                iconRes = R.drawable.ic_more_vert,
+                tint = PureWhite,
+                contentDescription = "Track Options",
+                onClick = onOpenMenu,
+                sizeDp = 42
+            )
+        }
+    }
+}
 
 @androidx.annotation.OptIn(UnstableApi::class)
 @Composable
-private fun FullBleedCoverTopSection(
+private fun StudioPrismStageSection(
     track: RezonaTrack,
-    queueName: String,
-    isLiked: Boolean,
+    isPlaying: Boolean,
     palette: DynamicArtworkPalette,
-    hasVideoStream: Boolean,
     isVideoMode: Boolean,
+    activeLyricPreview: String?,
     exoPlayerProvider: () -> androidx.media3.exoplayer.ExoPlayer?,
-    onToggleVideoMode: (Boolean) -> Unit,
-    onOpenQueue: () -> Unit,
+    onOpenLyrics: () -> Unit,
     onDoubleTapLike: () -> Unit,
     onSwipeNext: () -> Unit,
     onSwipePrev: () -> Unit,
     onSwipeDownDelta: (Float) -> Unit,
     onSwipeDownRelease: () -> Unit,
-    onLikeClick: () -> Unit,
-    onMenuClick: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     var swipeX by remember { mutableFloatStateOf(0f) }
     val animX by animateFloatAsState(swipeX, spring(dampingRatio = 0.78f, stiffness = 340f), label = "cover_x")
-    val view = LocalView.current
 
-    Column(
-        modifier = modifier.fillMaxSize(),
-        verticalArrangement = Arrangement.SpaceBetween
-    ) {
-        // Upper Gesture / Video Area (cover itself is drawn full-bleed behind this in parent with DstIn mask!)
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .weight(1f)
-                .pointerInput(Unit) {
-                    detectTapGestures(onDoubleTap = { onDoubleTapLike() })
-                }
-                .pointerInput(Unit) {
-                    detectHorizontalDragGestures(
-                        onHorizontalDrag = { _, dragAmount -> swipeX += dragAmount * 0.6f },
-                        onDragEnd = {
-                            if (swipeX > 120f) onSwipePrev()
-                            else if (swipeX < -120f) onSwipeNext()
-                            swipeX = 0f
-                        },
-                        onDragCancel = { swipeX = 0f }
-                    )
-                }
-                .pointerInput(Unit) {
-                    detectVerticalDragGestures(
-                        onVerticalDrag = { _, dy -> onSwipeDownDelta(dy) },
-                        onDragEnd = { onSwipeDownRelease() },
-                        onDragCancel = { onSwipeDownRelease() }
-                    )
-                }
-        ) {
-            // Minimal top contrast guard ONLY if cover top strip drops below 4.5:1 against white header
-            if (palette.needsTopContrastScrim && !isVideoMode) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .height(110.dp)
-                        .background(
-                            Brush.verticalGradient(
-                                listOf(palette.ambientBase.copy(alpha = 0.62f), Color.Transparent)
-                            )
-                        )
-                )
-            }
+    val infiniteSpin = rememberInfiniteTransition(label = "vinyl_spin")
+    val spinDeg by infiniteSpin.animateFloat(
+        initialValue = 0f,
+        targetValue = 360f,
+        animationSpec = infiniteRepeatable(tween(9000, easing = androidx.compose.animation.core.LinearEasing), AnimRepeatMode.Restart),
+        label = "deg"
+    )
 
-            // Part 3: Centered 16:9 Video Surface in Video Mode over continuous ambient background
-            if (isVideoMode) {
-                Box(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .aspectRatio(16f / 9f)
-                        .align(Alignment.Center)
-                        .offset { IntOffset(animX.roundToInt(), 0) }
-                        .background(Color.Black)
-                ) {
-                    AndroidView(
-                        factory = { ctx ->
-                            PlayerView(ctx).apply {
-                                useController = false
-                                resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
-                                setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
-                                player = exoPlayerProvider()
-                            }
-                        },
-                        update = { playerView ->
-                            val activePlayer = exoPlayerProvider()
-                            if (playerView.player != activePlayer) {
-                                playerView.player = activePlayer
-                            }
-                        },
-                        onRelease = { playerView ->
-                            playerView.player = null
-                        },
-                        modifier = Modifier.fillMaxSize()
-                    )
-                }
-            }
-
-            // Top-left Queue Header ("Now playing" + bold italic queue name)
-            Column(
-                modifier = Modifier
-                    .statusBarsPadding()
-                    .padding(horizontal = 20.dp, vertical = 14.dp)
-                    .clip(RoundedCornerShape(12.dp))
-                    .clickable(onClick = onOpenQueue)
-                    .padding(horizontal = 4.dp, vertical = 2.dp)
-            ) {
-                Text(
-                    text = "Now playing",
-                    style = Typography.bodySmall.copy(fontSize = 12.sp),
-                    color = Color(0xD9FFFFFF)
-                )
-                Text(
-                    text = queueName,
-                    style = Typography.titleMedium.copy(
-                        fontSize = 16.sp,
-                        fontWeight = FontWeight.Bold,
-                        fontStyle = FontStyle.Italic
-                    ),
-                    color = PureWhite,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-
-            // Part 3: Glass Segmented Control "Audio | Video" centered above title row (ONLY when video stream exists)
-            if (hasVideoStream) {
-                AudioVideoSegmentedToggle(
-                    isVideoMode = isVideoMode,
-                    tintedGlass = palette.glassTint,
-                    onSelectVideo = onToggleVideoMode,
-                    modifier = Modifier
-                        .align(Alignment.BottomCenter)
-                        .padding(bottom = 8.dp)
-                )
-            }
-        }
-
-        // Minimal contrast guard scrim ONLY if cover fade region contrast drops below 4.5:1
-        val titleRowBg = if (palette.needsFadeContrastScrim && !isVideoMode) {
-            Brush.verticalGradient(listOf(Color.Transparent, palette.ambientBase.copy(alpha = 0.45f)))
-        } else {
-            Brush.verticalGradient(listOf(Color.Transparent, Color.Transparent))
-        }
-
-        // Below Cover: Title & Artist left-aligned, Heart & 3-dot cover-tinted 48dp glass circles right
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .background(titleRowBg)
-                .padding(horizontal = 22.dp, vertical = 12.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
-        ) {
-            Column(modifier = Modifier.weight(1f)) {
-                Text(
-                    text = track.title,
-                    style = Typography.headlineMedium.copy(
-                        fontSize = 22.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = (-0.3).sp
-                    ),
-                    color = PureWhite,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-                Spacer(modifier = Modifier.height(2.dp))
-                Text(
-                    text = track.artist,
-                    style = Typography.bodyMedium.copy(fontSize = 15.sp),
-                    color = Color(0xCCFFFFFF),
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis
-                )
-            }
-
-            Spacer(modifier = Modifier.width(12.dp))
-
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                GlassCircleIconButton(
-                    iconRes = if (isLiked) R.drawable.ic_heart_filled else R.drawable.ic_heart_outline,
-                    tint = if (isLiked) Color(0xFFFF5A6E) else PureWhite,
-                    contentDescription = if (isLiked) "Unlike" else "Like",
-                    onClick = {
-                        view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
-                        onLikeClick()
-                    }
-                )
-                GlassCircleIconButton(
-                    iconRes = R.drawable.ic_more_vert,
-                    tint = PureWhite,
-                    contentDescription = "Track Options",
-                    onClick = {
-                        view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
-                        onMenuClick()
-                    }
-                )
-            }
-        }
-    }
-}
-
-@Composable
-private fun AudioVideoSegmentedToggle(
-    isVideoMode: Boolean,
-    tintedGlass: Color,
-    onSelectVideo: (Boolean) -> Unit,
-    modifier: Modifier = Modifier
-) {
-    val shape = CircleShape
-    val view = LocalView.current
-    Row(
+    BoxWithConstraints(
         modifier = modifier
-            .height(44.dp)
-            .clip(shape)
-            .background(
-                Brush.verticalGradient(
-                    listOf(
-                        lerp(tintedGlass, PureWhite, 0.14f).copy(alpha = 0.44f),
-                        tintedGlass.copy(alpha = 0.34f)
-                    )
+            .fillMaxSize()
+            .pointerInput(Unit) {
+                detectTapGestures(onDoubleTap = { onDoubleTapLike() })
+            }
+            .pointerInput(Unit) {
+                detectHorizontalDragGestures(
+                    onHorizontalDrag = { _, dragAmount -> swipeX += dragAmount * 0.6f },
+                    onDragEnd = {
+                        if (swipeX > 120f) onSwipePrev()
+                        else if (swipeX < -120f) onSwipeNext()
+                        swipeX = 0f
+                    },
+                    onDragCancel = { swipeX = 0f }
                 )
-            )
-            .border(1.dp, SpecularDockBorder, shape)
-            .padding(3.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        SegmentedModePill(
-            label = "Audio",
-            selected = !isVideoMode,
-            tintedGlass = tintedGlass,
-            onClick = {
-                view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
-                onSelectVideo(false)
             }
-        )
-        SegmentedModePill(
-            label = "Video",
-            selected = isVideoMode,
-            tintedGlass = tintedGlass,
-            onClick = {
-                view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
-                onSelectVideo(true)
-            }
-        )
-    }
-}
-
-@Composable
-private fun SegmentedModePill(
-    label: String,
-    selected: Boolean,
-    tintedGlass: Color,
-    onClick: () -> Unit
-) {
-    val pillShape = CircleShape
-    Box(
-        modifier = Modifier
-            .height(38.dp)
-            .clip(pillShape)
-            .then(
-                if (selected) {
-                    Modifier
-                        .background(
-                            Brush.verticalGradient(
-                                listOf(
-                                    lerp(tintedGlass, PureWhite, 0.30f).copy(alpha = 0.62f),
-                                    lerp(tintedGlass, PureWhite, 0.14f).copy(alpha = 0.48f)
-                                )
-                            )
-                        )
-                        .border(0.9.dp, Color(0x66FFFFFF), pillShape)
-                } else Modifier
-            )
-            .clickable(onClick = onClick)
-            .padding(horizontal = 22.dp),
+            .pointerInput(Unit) {
+                detectVerticalDragGestures(
+                    onVerticalDrag = { _, dy -> onSwipeDownDelta(dy) },
+                    onDragEnd = { onSwipeDownRelease() },
+                    onDragCancel = { onSwipeDownRelease() }
+                )
+            },
         contentAlignment = Alignment.Center
     ) {
-        Text(
-            text = label,
-            style = Typography.labelMedium.copy(
-                fontSize = 13.sp,
-                fontWeight = if (selected) FontWeight.Bold else FontWeight.Medium
-            ),
-            color = if (selected) PureWhite else Color(0xCCFFFFFF)
-        )
+        if (isVideoMode) {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 18.dp)
+                    .aspectRatio(16f / 9f)
+                    .offset { IntOffset(animX.roundToInt(), 0) }
+                    .clip(RoundedCornerShape(24.dp))
+                    .background(Color.Black)
+                    .border(1.dp, SpecularCardBorder, RoundedCornerShape(24.dp))
+            ) {
+                AndroidView(
+                    factory = { ctx ->
+                        PlayerView(ctx).apply {
+                            useController = false
+                            resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                            setShutterBackgroundColor(android.graphics.Color.TRANSPARENT)
+                            player = exoPlayerProvider()
+                        }
+                    },
+                    update = { playerView ->
+                        val activePlayer = exoPlayerProvider()
+                        if (playerView.player != activePlayer) {
+                            playerView.player = activePlayer
+                        }
+                    },
+                    onRelease = { playerView ->
+                        playerView.player = null
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+        } else {
+            val stageMaxWidth = maxWidth
+            val sleeveSize = (stageMaxWidth * 0.68f).coerceAtMost((maxHeight - 52.dp).coerceAtLeast(180.dp))
+            Column(
+                modifier = Modifier.offset { IntOffset(animX.roundToInt(), 0) },
+                horizontalAlignment = Alignment.CenterHorizontally,
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                // Floating Refractive Glass Pedestal + Peeking Spinning Vinyl Disc
+                Box(
+                    modifier = Modifier
+                        .width((sleeveSize + 36.dp).coerceAtMost(stageMaxWidth - 28.dp))
+                        .height(sleeveSize + 14.dp),
+                    contentAlignment = Alignment.CenterStart
+                ) {
+                    // Peeking spinning vinyl disc on the right
+                    val discSize = (sleeveSize - 18.dp).coerceAtLeast(140.dp)
+                    Box(
+                        modifier = Modifier
+                            .size(discSize)
+                            .align(Alignment.CenterEnd)
+                            .graphicsLayer {
+                                rotationZ = if (isPlaying) spinDeg else 0f
+                            }
+                            .clip(CircleShape)
+                            .background(
+                                Brush.radialGradient(
+                                    listOf(
+                                        Color(0xFF323744),
+                                        Color(0xFF0E1016),
+                                        Color(0xFF222631),
+                                        Color(0xFF07080B)
+                                    )
+                                )
+                            )
+                            .border(1.dp, Color(0x42FFFFFF), CircleShape),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        RezonaAsyncCoverArt(
+                            coverArtUrl = track.coverArtUrl,
+                            fallbackIndex = track.index,
+                            shape = CircleShape,
+                            modifier = Modifier
+                                .size(discSize * 0.34f)
+                                .border(1.dp, PureWhite.copy(alpha = 0.5f), CircleShape)
+                        )
+                        Box(
+                            modifier = Modifier
+                                .size(10.dp)
+                                .clip(CircleShape)
+                                .background(Color(0xFF07090D))
+                        )
+                    }
+
+                    // Double-rimmed Liquid Glass Sleeve Frame
+                    Box(
+                        modifier = Modifier
+                            .size(sleeveSize + 14.dp)
+                            .clip(RoundedCornerShape(30.dp))
+                            .background(
+                                Brush.verticalGradient(
+                                    listOf(
+                                        lerp(palette.glassTint, PureWhite, 0.16f).copy(alpha = 0.34f),
+                                        palette.glassTint.copy(alpha = 0.18f)
+                                    )
+                                )
+                            )
+                            .border(1.dp, SpecularDockBorder, RoundedCornerShape(30.dp))
+                            .padding(7.dp)
+                    ) {
+                        RezonaAsyncCoverArt(
+                            coverArtUrl = track.coverArtUrl,
+                            fallbackIndex = track.index,
+                            shape = RoundedCornerShape(24.dp),
+                            modifier = Modifier
+                                .fillMaxSize()
+                                .border(0.75.dp, SpecularCardBorder, RoundedCornerShape(24.dp))
+                        )
+                    }
+                }
+
+                // Live 1-line lyric ticker pill under the sleeve (tap -> full Lyrics mode!)
+                if (!activeLyricPreview.isNullOrBlank()) {
+                    AnimatedContent(
+                        targetState = activeLyricPreview,
+                        transitionSpec = { fadeIn(tween(200)) togetherWith fadeOut(tween(140)) },
+                        label = "sleeve_lyric_ticker"
+                    ) { lyricLine ->
+                        Box(
+                            modifier = Modifier
+                                .padding(horizontal = 28.dp)
+                                .clip(CircleShape)
+                                .background(Color(0x22FFFFFF))
+                                .border(0.75.dp, Color(0x36FFFFFF), CircleShape)
+                                .clickable(onClick = onOpenLyrics)
+                                .padding(horizontal = 16.dp, vertical = 7.dp)
+                        ) {
+                            Text(
+                                text = lyricLine,
+                                style = Typography.labelLarge.copy(fontSize = 12.5.sp, fontWeight = FontWeight.SemiBold),
+                                color = PureWhite.copy(alpha = 0.94f),
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                textAlign = TextAlign.Center
+                            )
+                        }
+                    }
+                }
+            }
+        }
     }
 }
 
@@ -804,11 +817,12 @@ private fun GlassCircleIconButton(
     iconRes: Int,
     tint: Color,
     contentDescription: String,
-    onClick: () -> Unit
+    onClick: () -> Unit,
+    sizeDp: Int = 46
 ) {
     GlassSurface(
         variant = GlassSurfaceVariant.IconButton,
-        modifier = Modifier.size(48.dp),
+        modifier = Modifier.size(sizeDp.dp),
         shape = CircleShape,
         onClick = onClick,
         contentAlignment = Alignment.Center
@@ -817,17 +831,20 @@ private fun GlassCircleIconButton(
             painter = painterResource(id = iconRes),
             contentDescription = contentDescription,
             tint = tint,
-            modifier = Modifier.size(21.dp)
+            modifier = Modifier.size(20.dp)
         )
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// SHARED BOTTOM CONTROL DECK (`now_playing.jpg` & `lyrics.jpg`)
+// FLOATING STUDIO CONSOLE DECK
 // ─────────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun NowPlayingControlDeck(
+private fun StudioConsoleControlDeck(
+    track: RezonaTrack,
+    queueName: String,
+    isLiked: Boolean,
     bars: List<Float>,
     scrubberStyle: String,
     currentPositionMs: Long,
@@ -841,6 +858,8 @@ private fun NowPlayingControlDeck(
     isSoundSheetOpen: Boolean,
     sleepSecRemaining: Int?,
     sleepEndOfTrack: Boolean,
+    onOpenQueue: () -> Unit,
+    onToggleLike: () -> Unit,
     onSeekFraction: (Float) -> Unit,
     onToggleShuffle: () -> Unit,
     onSkipPrev: () -> Unit,
@@ -853,6 +872,7 @@ private fun NowPlayingControlDeck(
     onOpenSleepTimer: () -> Unit,
     onOpenSoundSheet: () -> Unit
 ) {
+    val view = LocalView.current
     val progressFraction = if (durationMs > 0) (currentPositionMs.toFloat() / durationMs.toFloat()).coerceIn(0f, 1f) else 0f
     val elapsedStr = remember(currentPositionMs) { formatDuration(currentPositionMs) }
     val remainingStr = remember(currentPositionMs, durationMs) {
@@ -860,127 +880,225 @@ private fun NowPlayingControlDeck(
         "-${formatDuration(rem)}"
     }
     val tintedGlass = LocalTintedGlassColor.current
+    val consoleShape = RoundedCornerShape(30.dp)
 
-    Column(
+    Box(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 22.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(12.dp)
-    ) {
-        // 1. Progress Line (or Waveform Scrubber if chosen in Settings)
-        Column(modifier = Modifier.fillMaxWidth()) {
-            if (scrubberStyle == "Waveform") {
-                WaveformScrubberBar(bars = bars, progressFraction = progressFraction, onSeekFraction = onSeekFraction)
-            } else {
-                LineProgressScrubber(progressFraction = progressFraction, onSeekFraction = onSeekFraction)
-            }
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween
-            ) {
-                Text(text = elapsedStr, style = Typography.bodySmall.copy(fontSize = 12.sp), color = Color(0xB8FFFFFF))
-                Text(text = remainingStr, style = Typography.bodySmall.copy(fontSize = 12.sp), color = Color(0x99FFFFFF))
-            }
-        }
-
-        // 2. Bare Transport Row (transient glass bubble appears ONLY while pressed)
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            BareTransportButton(
-                iconRes = R.drawable.ic_shuffle,
-                tint = if (isShuffle) PureWhite else Color(0xAAFFFFFF),
-                iconSizeDp = 21,
-                contentDescription = "Shuffle",
-                onClick = onToggleShuffle
-            )
-            BareTransportButton(
-                iconRes = R.drawable.ic_skip_previous,
-                tint = PureWhite,
-                iconSizeDp = 28,
-                contentDescription = "Previous",
-                onClick = onSkipPrev
-            )
-            BareTransportButton(
-                iconRes = if (isPlaying) R.drawable.ic_pause else R.drawable.ic_play_arrow,
-                tint = PureWhite,
-                iconSizeDp = 36,
-                buttonSizeDp = 62,
-                contentDescription = if (isPlaying) "Pause" else "Play",
-                onClick = onPlayPause
-            )
-            BareTransportButton(
-                iconRes = R.drawable.ic_skip_next,
-                tint = PureWhite,
-                iconSizeDp = 28,
-                contentDescription = "Next",
-                onClick = onSkipNext
-            )
-            BareTransportButton(
-                iconRes = if (repeatMode == RepeatMode.ONE) R.drawable.ic_repeat_one else R.drawable.ic_repeat,
-                tint = if (repeatMode != RepeatMode.OFF) PureWhite else Color(0xAAFFFFFF),
-                iconSizeDp = 21,
-                contentDescription = "Repeat",
-                onClick = onToggleRepeat
-            )
-        }
-
-        // 3. Volume Row (bound to STREAM_MUSIC)
-        Row(
-            modifier = Modifier.fillMaxWidth(),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Icon(
-                painter = painterResource(id = R.drawable.ic_volume_low),
-                contentDescription = null,
-                tint = SoftSilver,
-                modifier = Modifier.size(18.dp)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            RezonaGlassSlider(
-                value = volumeFraction,
-                onValueChange = onVolumeChange,
-                valueRange = 0f..1f,
-                modifier = Modifier
-                    .weight(1f)
-                    .height(38.dp)
-            )
-            Spacer(modifier = Modifier.width(8.dp))
-            Icon(
-                painter = painterResource(id = R.drawable.ic_volume_high),
-                contentDescription = null,
-                tint = PureWhite,
-                modifier = Modifier.size(18.dp)
-            )
-        }
-
-        // 4. Bottom 4-Button Cover-Tinted Glass Pill: Lyrics | Share | Sleep timer | Sound
-        val timerActive = sleepSecRemaining != null || sleepEndOfTrack
-        val soundPresetActive = activePreset != SoundPreset.NORMAL
-        val pillShape = RoundedCornerShape(28.dp)
-        Box(
-            modifier = Modifier
-                .fillMaxWidth()
-                .height(56.dp)
-                .clip(pillShape)
-                .background(
-                    Brush.verticalGradient(
-                        listOf(
-                            lerp(tintedGlass, PureWhite, 0.14f).copy(alpha = 0.44f),
-                            tintedGlass.copy(alpha = 0.34f)
-                        )
+            .padding(horizontal = 14.dp, vertical = 10.dp)
+            .clip(consoleShape)
+            .background(
+                Brush.verticalGradient(
+                    listOf(
+                        lerp(tintedGlass, PureWhite, 0.12f).copy(alpha = 0.42f),
+                        tintedGlass.copy(alpha = 0.28f),
+                        Color(0xCC090B10)
                     )
                 )
-                .border(1.dp, SpecularDockBorder, pillShape)
-                .padding(horizontal = 6.dp, vertical = 5.dp)
+            )
+            .border(1.dp, SpecularDockBorder, consoleShape)
+            .padding(horizontal = 18.dp, vertical = 14.dp)
+    ) {
+        Column(
+            modifier = Modifier.fillMaxWidth(),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
+            // 1. Track Metadata + Active FX Pill + Coral-Red Like Disc
             Row(
-                modifier = Modifier.fillMaxSize(),
-                horizontalArrangement = Arrangement.spacedBy(4.dp),
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = track.title,
+                        style = Typography.headlineMedium.copy(
+                            fontSize = 20.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            letterSpacing = (-0.3).sp
+                        ),
+                        color = PureWhite,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Text(
+                            text = track.artist,
+                            style = Typography.bodyMedium.copy(fontSize = 13.5.sp),
+                            color = Color(0xCCFFFFFF),
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.weight(1f, fill = false)
+                        )
+                        if (queueName.isNotBlank()) {
+                            Text(
+                                text = "· $queueName",
+                                style = Typography.labelSmall.copy(fontSize = 11.sp),
+                                color = SoftSilver,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.clickable(onClick = onOpenQueue)
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(10.dp))
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    // Instant Sound Preset Badge
+                    Box(
+                        modifier = Modifier
+                            .height(36.dp)
+                            .clip(CircleShape)
+                            .background(
+                                if (activePreset != SoundPreset.NORMAL) Color(0x36FFFFFF) else Color(0x1CFFFFFF)
+                            )
+                            .border(0.8.dp, SpecularCardBorder, CircleShape)
+                            .clickable(onClick = onOpenSoundSheet)
+                            .padding(horizontal = 11.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                painter = painterResource(id = R.drawable.ic_sound_waves),
+                                contentDescription = "Sound FX",
+                                tint = PureWhite,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = if (activePreset == SoundPreset.NORMAL) "FX" else activePreset.label.take(8),
+                                style = Typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                color = PureWhite
+                            )
+                        }
+                    }
+
+                    GlassCircleIconButton(
+                        iconRes = if (isLiked) R.drawable.ic_heart_filled else R.drawable.ic_heart_outline,
+                        tint = if (isLiked) Color(0xFFFF5A6E) else PureWhite,
+                        contentDescription = if (isLiked) "Unlike" else "Like",
+                        sizeDp = 42,
+                        onClick = {
+                            view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                            onToggleLike()
+                        }
+                    )
+                }
+            }
+
+            // 2. Scrubber + Timestamps
+            Column(modifier = Modifier.fillMaxWidth()) {
+                if (scrubberStyle == "Waveform") {
+                    WaveformScrubberBar(bars = bars, progressFraction = progressFraction, onSeekFraction = onSeekFraction)
+                } else {
+                    LineProgressScrubber(progressFraction = progressFraction, onSeekFraction = onSeekFraction)
+                }
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(text = elapsedStr, style = Typography.bodySmall.copy(fontSize = 11.5.sp), color = Color(0xB8FFFFFF))
+                    Text(text = remainingStr, style = Typography.bodySmall.copy(fontSize = 11.5.sp), color = Color(0x99FFFFFF))
+                }
+            }
+
+            // 3. Sculpted Studio Transport Row (Wide PureWhite Capsule Play/Pause Centerpiece)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
+                BareTransportButton(
+                    iconRes = R.drawable.ic_shuffle,
+                    tint = if (isShuffle) PureWhite else Color(0x99FFFFFF),
+                    iconSizeDp = 20,
+                    contentDescription = "Shuffle",
+                    onClick = onToggleShuffle
+                )
+                BareTransportButton(
+                    iconRes = R.drawable.ic_skip_previous,
+                    tint = PureWhite,
+                    iconSizeDp = 26,
+                    contentDescription = "Previous",
+                    onClick = onSkipPrev
+                )
+                // Signature Rezona Studio Capsule Play/Pause Button
+                Box(
+                    modifier = Modifier
+                        .width(78.dp)
+                        .height(50.dp)
+                        .clip(CircleShape)
+                        .background(PureWhite)
+                        .clickable {
+                            view.performHapticFeedback(HapticFeedbackConstants.CLOCK_TICK)
+                            onPlayPause()
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        painter = painterResource(
+                            id = if (isPlaying) R.drawable.ic_pause else R.drawable.ic_play_arrow
+                        ),
+                        contentDescription = if (isPlaying) "Pause" else "Play",
+                        tint = Color(0xFF07090D),
+                        modifier = Modifier.size(26.dp)
+                    )
+                }
+                BareTransportButton(
+                    iconRes = R.drawable.ic_skip_next,
+                    tint = PureWhite,
+                    iconSizeDp = 26,
+                    contentDescription = "Next",
+                    onClick = onSkipNext
+                )
+                BareTransportButton(
+                    iconRes = if (repeatMode == RepeatMode.ONE) R.drawable.ic_repeat_one else R.drawable.ic_repeat,
+                    tint = if (repeatMode != RepeatMode.OFF) PureWhite else Color(0x99FFFFFF),
+                    iconSizeDp = 20,
+                    contentDescription = "Repeat",
+                    onClick = onToggleRepeat
+                )
+            }
+
+            // 4. Compact Volume + Utility Strip (Lyrics · Sleep Timer · Share Poster)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Icon(
+                    painter = painterResource(id = R.drawable.ic_volume_low),
+                    contentDescription = null,
+                    tint = SoftSilver,
+                    modifier = Modifier.size(16.dp)
+                )
+                RezonaGlassSlider(
+                    value = volumeFraction,
+                    onValueChange = onVolumeChange,
+                    valueRange = 0f..1f,
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(32.dp)
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+
+                val timerActive = sleepSecRemaining != null || sleepEndOfTrack
+                val countdownLabel = when {
+                    sleepEndOfTrack -> "End"
+                    sleepSecRemaining != null -> "${(sleepSecRemaining + 59) / 60}m"
+                    else -> null
+                }
+
                 BottomPillIconSlot(
                     iconRes = R.drawable.ic_lyrics,
                     isActive = isLyricsMode,
@@ -989,7 +1107,17 @@ private fun NowPlayingControlDeck(
                     tintedGlass = tintedGlass,
                     contentDescription = "Lyrics",
                     onClick = onToggleLyrics,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.width(44.dp).height(36.dp)
+                )
+                BottomPillIconSlot(
+                    iconRes = R.drawable.ic_timer,
+                    isActive = timerActive,
+                    badgeText = countdownLabel,
+                    showIndicatorDot = false,
+                    tintedGlass = tintedGlass,
+                    contentDescription = "Sleep Timer",
+                    onClick = onOpenSleepTimer,
+                    modifier = Modifier.width(if (countdownLabel != null) 62.dp else 44.dp).height(36.dp)
                 )
                 BottomPillIconSlot(
                     iconRes = R.drawable.ic_share,
@@ -999,35 +1127,7 @@ private fun NowPlayingControlDeck(
                     tintedGlass = tintedGlass,
                     contentDescription = "Share",
                     onClick = onOpenShare,
-                    modifier = Modifier.weight(1f)
-                )
-                val countdownLabel = when {
-                    sleepEndOfTrack -> "End"
-                    sleepSecRemaining != null -> {
-                        val m = (sleepSecRemaining + 59) / 60
-                        "${m}m"
-                    }
-                    else -> null
-                }
-                BottomPillIconSlot(
-                    iconRes = R.drawable.ic_timer,
-                    isActive = timerActive,
-                    badgeText = countdownLabel,
-                    showIndicatorDot = false,
-                    tintedGlass = tintedGlass,
-                    contentDescription = "Sleep Timer",
-                    onClick = onOpenSleepTimer,
-                    modifier = Modifier.weight(1f)
-                )
-                BottomPillIconSlot(
-                    iconRes = R.drawable.ic_sound_waves,
-                    isActive = isSoundSheetOpen,
-                    badgeText = null,
-                    showIndicatorDot = soundPresetActive,
-                    tintedGlass = tintedGlass,
-                    contentDescription = "Sound Effects",
-                    onClick = onOpenSoundSheet,
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.width(44.dp).height(36.dp)
                 )
             }
         }

@@ -12,10 +12,11 @@ import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.WindowInsets
 import androidx.compose.foundation.layout.asPaddingValues
-import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBars
@@ -61,9 +62,13 @@ import com.nayama.music.data.repository.RezonaLibraryRepository
 import com.nayama.music.data.repository.toRezonaTrack
 import com.nayama.music.model.RezonaTrack
 import com.nayama.music.playback.RezonaPlayerController
+import com.nayama.music.ui.components.GlassSurface
+import com.nayama.music.ui.components.GlassSurfaceVariant
 import com.nayama.music.ui.components.LocalRezonaHazeState
+import com.nayama.music.ui.components.RezonaActionDisc
 import com.nayama.music.ui.components.RezonaAsyncCoverArt
 import com.nayama.music.ui.components.RezonaEqualizerModalSheet
+import com.nayama.music.ui.components.RezonaGlassCard
 import com.nayama.music.ui.components.RezonaGlassPill
 import com.nayama.music.ui.components.RezonaHairlineDivider
 import com.nayama.music.ui.components.RezonaTrackMenuSheet
@@ -193,11 +198,16 @@ val REAL_POPULAR_SEEDS = listOf(
     )
 )
 
-private val V2_MOOD_CHIPS = listOf("Relax", "Feel good", "Energize", "Sleep", "Sad", "Workout", "Focus")
+private val REZONA_FREQUENCIES = listOf("Relax", "Feel good", "Energize", "Sleep", "Sad", "Workout", "Focus")
 
 /**
- * Rezona Home Screen (V2 Stage A — home_1/2/3.jpg structure)
- * Strictly NO streak card, NO boxes behind list content, all real YouTube Music + Room data.
+ * Rezona Original Spatial Prism Home Screen ("Sonic Horizon & Vinyl Bento"):
+ * - Editorial Rezona masthead with instant Equalizer & Settings Liquid Glass discs
+ * - Unified Frosted Frequency Capsule Strip
+ * - Featured Vinyl-Sleeve Spotlight Deck (peeking vinyl disc + instant Play Mix)
+ * - 2-Row Horizontal Speed Dial Glass Bento Capsules
+ * - Numbered Frosted Rotation Chart Decks (01..04 per swipeable glass card)
+ * - Tall Portrait Sonic Mix Posters with frosted bottom caption plates
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -305,16 +315,17 @@ fun RezonaHomeScreen(
         }
     }
 
-    val greetingText = remember {
-        when (Calendar.getInstance().get(Calendar.HOUR_OF_DAY)) {
-            in 4..11 -> "Good morning"
-            in 12..16 -> "Good afternoon"
-            else -> "Good evening"
+    val sessionSubtitle = remember(historyTracks.size) {
+        val period = when (Calendar.getInstance().get(Calendar.HOUR_OF_DAY)) {
+            in 4..11 -> "Morning sonic horizon"
+            in 12..17 -> "Afternoon studio deck"
+            else -> "After-hours resonance"
         }
+        if (historyTracks.isNotEmpty()) "$period · ${historyTracks.size} in rotation" else period
     }
 
-    val quickPicks = remember(pinnedSpeedDialEntities, historyTracks, homeSections, moodFilteredTracks, selectedMood) {
-        val base = when {
+    val spotlightPool = remember(selectedMood, moodFilteredTracks, pinnedSpeedDialEntities, historyTracks, homeSections) {
+        when {
             selectedMood != null && moodFilteredTracks.isNotEmpty() -> moodFilteredTracks
             else -> {
                 val pinned = pinnedSpeedDialEntities.map { it.toRezonaTrack() }
@@ -322,30 +333,24 @@ fun RezonaHomeScreen(
                 (pinned + historyTracks + homeItems + REAL_POPULAR_SEEDS).distinctBy { it.id }
             }
         }
-        base.take(6)
     }
 
-    val continueSection = remember(homeSections, staplesSource) {
-        val firstCarousel = homeSections.firstOrNull { it.items.isNotEmpty() }
-        val tracks = firstCarousel?.items?.take(12) ?: staplesSource.take(8)
-        Triple(
-            tracks.firstOrNull(),
-            firstCarousel?.title ?: staplesSource.firstOrNull()?.artist ?: "Continue Listening",
-            tracks
-        )
-    }
+    val spotlightLead = spotlightPool.firstOrNull() ?: REAL_POPULAR_SEEDS.first()
+    val speedDialCards = spotlightPool.drop(1).ifEmpty { REAL_POPULAR_SEEDS }.take(8)
 
-    val listenerPickMosaics = remember(homeSections, songMixTracks, trendingTracks) {
-        val poolA = (homeSections.firstOrNull()?.items ?: songMixTracks).take(4)
-        val poolB = (homeSections.getOrNull(1)?.items ?: trendingTracks).take(4)
+    val curatedPosters = remember(homeSections, songMixTracks, trendingTracks, coversAndRemixes) {
+        val a = (homeSections.firstOrNull()?.items ?: songMixTracks).take(8)
+        val b = (homeSections.getOrNull(1)?.items ?: trendingTracks).take(8)
+        val c = coversAndRemixes.take(8)
         listOfNotNull(
-            if (poolA.isNotEmpty()) Triple("Acoustic Resonance", "${poolA.firstOrNull()?.artist ?: "Mixed"} & more", poolA) else null,
-            if (poolB.isNotEmpty()) Triple("After Hours Mix", "${poolB.firstOrNull()?.artist ?: "YouTube Music"} Radio", poolB) else null
+            if (a.isNotEmpty()) Triple("Acoustic Prism", a.first().artist, a) else null,
+            if (b.isNotEmpty()) Triple("Midnight Pulse", b.first().artist, b) else null,
+            if (c.isNotEmpty()) Triple("Stripped & Reworked", c.first().artist, c) else null
         )
     }
 
     val statusTop = WindowInsets.statusBars.asPaddingValues().calculateTopPadding()
-    val bottomPad = if (controller.currentTrack.value != null) 168.dp else 108.dp
+    val bottomPad = if (controller.currentTrack.value != null) 172.dp else 112.dp
 
     Box(modifier = modifier.fillMaxSize()) {
         PullToRefreshBox(
@@ -365,501 +370,546 @@ fun RezonaHomeScreen(
                     .fillMaxSize()
                     .nestedScroll(scrollConnection)
                     .rezonaHazeSource(hazeState),
-                contentPadding = PaddingValues(top = statusTop + 12.dp, bottom = bottomPad),
-                verticalArrangement = Arrangement.spacedBy(24.dp)
+                contentPadding = PaddingValues(top = statusTop + 14.dp, bottom = bottomPad),
+                verticalArrangement = Arrangement.spacedBy(22.dp)
             ) {
-                // ── 1. HEADER: Small "Home" + Big Time-based Greeting ─────────────
-                item(key = "home_header") {
-                    Column(
+                // ── 1. REZONA EDITORIAL MASTHEAD + ACTION DISCS ──────────────────
+                item(key = "home_masthead") {
+                    Row(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 20.dp)
+                            .padding(horizontal = 20.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                    Text(
-                        text = "Home",
-                        style = Typography.bodySmall.copy(fontSize = 14.sp, fontWeight = FontWeight.Medium),
-                        color = PearlWhite.copy(alpha = 0.85f)
-                    )
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                        text = greetingText,
-                        style = Typography.displayLarge.copy(fontSize = 30.sp, fontWeight = FontWeight.Bold),
-                        color = PureWhite
-                    )
-                }
-            }
-
-            // ── 2. QUICK PICKS (2-col grid of compact plain rows, NO card background) ──
-            item(key = "home_quick_picks") {
-                Column(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(horizontal = 20.dp),
-                    verticalArrangement = Arrangement.spacedBy(10.dp)
-                ) {
-                    quickPicks.chunked(2).forEach { pair ->
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
-                        ) {
-                            pair.forEach { track ->
-                                Row(
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .height(52.dp)
-                                        .clip(RoundedCornerShape(8.dp))
-                                        .clickable {
-                                            controller.playTrack(track, queueTitle = "Quick Picks", autoQueueRadio = true)
-                                        },
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    RezonaAsyncCoverArt(
-                                        coverArtUrl = track.coverArtUrl,
-                                        fallbackIndex = track.index,
-                                        shape = RoundedCornerShape(8.dp),
-                                        modifier = Modifier.size(50.dp)
-                                    )
-                                    Spacer(modifier = Modifier.width(10.dp))
-                                    Text(
-                                        text = track.title,
-                                        style = Typography.titleMedium.copy(fontSize = 13.5.sp, fontWeight = FontWeight.SemiBold),
-                                        color = PearlWhite,
-                                        maxLines = 2,
-                                        overflow = TextOverflow.Ellipsis,
-                                        modifier = Modifier.weight(1f)
-                                    )
-                                }
-                            }
-                            if (pair.size == 1) Spacer(modifier = Modifier.weight(1f))
-                        }
-                    }
-                }
-            }
-
-            // ── 3. NO STREAK CARD (Skipped intentionally per global rules) ───
-
-            // ── 4. MOOD CHIPS ────────────────────────────────────────────────
-            item(key = "home_mood_chips") {
-                LazyRow(
-                    contentPadding = PaddingValues(horizontal = 20.dp),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    items(V2_MOOD_CHIPS) { mood ->
-                        val isActive = selectedMood == mood
-                        RezonaGlassPill(
-                            isActive = isActive,
-                            onClick = { selectedMood = if (isActive) null else mood }
-                        ) {
+                        Column(modifier = Modifier.weight(1f)) {
                             Text(
-                                text = mood,
-                                style = Typography.labelLarge.copy(fontSize = 13.sp, fontWeight = FontWeight.Medium),
-                                color = if (isActive) PureWhite else SoftSilver
+                                text = "Rezona",
+                                style = Typography.displayLarge.copy(
+                                    fontSize = 30.sp,
+                                    fontWeight = FontWeight.ExtraBold,
+                                    letterSpacing = (-0.6).sp
+                                ),
+                                color = PureWhite
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = sessionSubtitle,
+                                style = Typography.bodySmall.copy(fontSize = 12.5.sp),
+                                color = SoftSilver
                             )
                         }
-                    }
-                }
-            }
-
-            // Crossfade filtered spotlight when mood is selected
-            if (selectedMood != null) {
-                item(key = "home_mood_filtered") {
-                    Crossfade(targetState = moodFilteredTracks, label = "mood_xfade") { tracks ->
-                        Column(modifier = Modifier.fillMaxWidth()) {
-                            PagedSongMixSection(
-                                title = "$selectedMood Mix",
-                                tracks = tracks.ifEmpty { REAL_POPULAR_SEEDS },
-                                onPlayAll = {
-                                    val list = tracks.ifEmpty { REAL_POPULAR_SEEDS }
-                                    controller.playQueue(list, 0, "$selectedMood Mix")
-                                },
-                                onPlayTrack = { t, idx ->
-                                    val list = tracks.ifEmpty { REAL_POPULAR_SEEDS }
-                                    controller.playQueue(list, idx, "$selectedMood Mix")
-                                },
-                                onOpenMenu = { menuTrack = it }
-                            )
-                        }
-                    }
-                }
-            }
-
-            // ── 5. CONTINUE (Large Rounded Cover + Title + "N songs") ────────
-            item(key = "home_continue") {
-                val (leadTrack, title, continueTracks) = continueSection
-                Column(modifier = Modifier.padding(horizontal = 20.dp)) {
-                    Text(
-                        text = "Continue",
-                        style = Typography.titleLarge.copy(fontSize = 21.sp, fontWeight = FontWeight.Bold),
-                        color = PureWhite
-                    )
-                    Spacer(modifier = Modifier.height(14.dp))
-                    Column(
-                        modifier = Modifier
-                            .width(172.dp)
-                            .clickable {
-                                controller.playQueue(continueTracks, 0, title)
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            RezonaActionDisc(size = 44.dp, onClick = { showEqualizer = true }) {
+                                Icon(
+                                    painter = painterResource(id = R.drawable.ic_equalizer),
+                                    contentDescription = "Equalizer",
+                                    tint = PearlWhite,
+                                    modifier = Modifier.size(19.dp)
+                                )
                             }
-                    ) {
-                        RezonaAsyncCoverArt(
-                            coverArtUrl = leadTrack?.coverArtUrl.orEmpty(),
-                            fallbackIndex = leadTrack?.index ?: 0,
-                            shape = RoundedCornerShape(14.dp),
-                            modifier = Modifier.size(172.dp)
-                        )
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Text(
-                            text = title,
-                            style = Typography.titleMedium.copy(fontSize = 14.5.sp, fontWeight = FontWeight.Bold),
-                            color = PearlWhite,
-                            maxLines = 1,
-                            overflow = TextOverflow.Ellipsis
-                        )
-                        Text(
-                            text = "${continueTracks.size} songs",
-                            style = Typography.bodySmall.copy(fontSize = 12.sp),
-                            color = SmokySilver
-                        )
-                    }
-                }
-            }
-
-            // ── 6. YOUR STAPLES (3-column, 3 rows per page + page dots + first chevron) ──
-            item(key = "home_your_staples") {
-                val expandedStaples = remember(staplesSource, songMixTracks) {
-                    (staplesSource + songMixTracks).distinctBy { it.id }.take(18)
-                }
-                val pages = remember(expandedStaples) { expandedStaples.chunked(9) }
-                val pagerState = rememberPagerState(pageCount = { pages.size.coerceAtLeast(1) })
-
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    Text(
-                        text = "Your staples",
-                        style = Typography.titleLarge.copy(fontSize = 21.sp, fontWeight = FontWeight.Bold),
-                        color = PureWhite,
-                        modifier = Modifier.padding(horizontal = 20.dp)
-                    )
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    HorizontalPager(
-                        state = pagerState,
-                        contentPadding = PaddingValues(horizontal = 20.dp),
-                        pageSpacing = 16.dp
-                    ) { pageIdx ->
-                        val itemsOnPage = pages[pageIdx]
-                        Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-                            itemsOnPage.chunked(3).forEachIndexed { rowIdx, rowItems ->
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.spacedBy(10.dp)
-                                ) {
-                                    rowItems.forEachIndexed { colIdx, item ->
-                                        val isVeryFirst = pageIdx == 0 && rowIdx == 0 && colIdx == 0
-                                        Column(
-                                            modifier = Modifier
-                                                .weight(1f)
-                                                .clickable {
-                                                    controller.playTrack(item, queueTitle = "Your Staples", autoQueueRadio = true)
-                                                }
-                                        ) {
-                                            RezonaAsyncCoverArt(
-                                                coverArtUrl = item.coverArtUrl,
-                                                fallbackIndex = item.index,
-                                                shape = RoundedCornerShape(10.dp),
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .aspectRatio(1f)
-                                            )
-                                            Spacer(modifier = Modifier.height(6.dp))
-                                            Row(
-                                                verticalAlignment = Alignment.CenterVertically,
-                                                horizontalArrangement = Arrangement.SpaceBetween,
-                                                modifier = Modifier.fillMaxWidth()
-                                            ) {
-                                                Text(
-                                                    text = if (isVeryFirst) item.artist.substringBefore(" ft.") else item.title,
-                                                    style = Typography.labelMedium.copy(fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
-                                                    color = PearlWhite,
-                                                    maxLines = 1,
-                                                    overflow = TextOverflow.Ellipsis,
-                                                    modifier = Modifier.weight(1f)
-                                                )
-                                                if (isVeryFirst) {
-                                                    Icon(
-                                                        painter = painterResource(id = R.drawable.ic_chevron_right),
-                                                        contentDescription = null,
-                                                        tint = SoftSilver,
-                                                        modifier = Modifier.size(14.dp)
-                                                    )
-                                                }
-                                            }
-                                        }
-                                    }
-                                    repeat(3 - rowItems.size) {
-                                        Spacer(modifier = Modifier.weight(1f))
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    if (pages.size > 1) {
-                        Spacer(modifier = Modifier.height(12.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.Center,
-                            verticalAlignment = Alignment.CenterVertically
-                        ) {
-                            repeat(pages.size) { idx ->
-                                val selected = pagerState.currentPage == idx
-                                Box(
-                                    modifier = Modifier
-                                        .padding(horizontal = 3.dp)
-                                        .height(5.dp)
-                                        .width(if (selected) 18.dp else 5.dp)
-                                        .clip(CircleShape)
-                                        .background(if (selected) PureWhite else Color(0x40FFFFFF))
+                            RezonaActionDisc(size = 44.dp, onClick = onOpenSettings) {
+                                Icon(
+                                    painter = painterResource(id = R.drawable.ic_settings),
+                                    contentDescription = "Settings",
+                                    tint = PearlWhite,
+                                    modifier = Modifier.size(19.dp)
                                 )
                             }
                         }
                     }
                 }
-            }
 
-            // ── 7. LISTENER PICKS (2x2 Mosaic Collages with Play Overlay) ────
-            item(key = "home_listener_picks") {
-                Column(modifier = Modifier.fillMaxWidth()) {
-                    Text(
-                        text = "Listener picks",
-                        style = Typography.titleLarge.copy(fontSize = 21.sp, fontWeight = FontWeight.Bold),
-                        color = PureWhite,
-                        modifier = Modifier.padding(horizontal = 20.dp)
-                    )
-                    Spacer(modifier = Modifier.height(14.dp))
+                // ── 2. UNIFIED FROSTED FREQUENCY CAPSULE BAR ─────────────────────
+                item(key = "home_frequency_bar") {
                     LazyRow(
                         contentPadding = PaddingValues(horizontal = 20.dp),
-                        horizontalArrangement = Arrangement.spacedBy(14.dp)
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        items(listenerPickMosaics) { (title, subtitle, mosaicTracks) ->
-                            Column(
-                                modifier = Modifier
-                                    .width(196.dp)
-                                    .clickable {
-                                        controller.playQueue(mosaicTracks, 0, title)
-                                    }
+                        item(key = "freq_all") {
+                            val active = selectedMood == null
+                            RezonaGlassPill(
+                                isActive = active,
+                                onClick = { selectedMood = null }
                             ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(196.dp)
-                                        .clip(RoundedCornerShape(14.dp))
-                                ) {
-                                    Column(modifier = Modifier.fillMaxSize()) {
-                                        Row(modifier = Modifier.weight(1f)) {
-                                            RezonaAsyncCoverArt(
-                                                coverArtUrl = mosaicTracks.getOrNull(0)?.coverArtUrl.orEmpty(),
-                                                fallbackIndex = 0,
-                                                shape = RoundedCornerShape(0.dp),
-                                                modifier = Modifier.weight(1f).fillMaxSize()
-                                            )
-                                            RezonaAsyncCoverArt(
-                                                coverArtUrl = mosaicTracks.getOrNull(1)?.coverArtUrl.orEmpty(),
-                                                fallbackIndex = 1,
-                                                shape = RoundedCornerShape(0.dp),
-                                                modifier = Modifier.weight(1f).fillMaxSize()
-                                            )
-                                        }
-                                        Row(modifier = Modifier.weight(1f)) {
-                                            RezonaAsyncCoverArt(
-                                                coverArtUrl = mosaicTracks.getOrNull(2)?.coverArtUrl.orEmpty(),
-                                                fallbackIndex = 2,
-                                                shape = RoundedCornerShape(0.dp),
-                                                modifier = Modifier.weight(1f).fillMaxSize()
-                                            )
-                                            RezonaAsyncCoverArt(
-                                                coverArtUrl = mosaicTracks.getOrNull(3)?.coverArtUrl.orEmpty(),
-                                                fallbackIndex = 3,
-                                                shape = RoundedCornerShape(0.dp),
-                                                modifier = Modifier.weight(1f).fillMaxSize()
-                                            )
-                                        }
-                                    }
-                                    // Floating play circle overlay
-                                    Box(
-                                        modifier = Modifier
-                                            .align(Alignment.BottomEnd)
-                                            .padding(10.dp)
-                                            .size(36.dp)
-                                            .clip(CircleShape)
-                                            .background(Color(0xA6000000))
-                                            .border(1.dp, SpecularCardBorder, CircleShape),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Icon(
-                                            painter = painterResource(id = R.drawable.ic_play_arrow),
-                                            contentDescription = "Play Mix",
-                                            tint = PureWhite,
-                                            modifier = Modifier.size(18.dp)
-                                        )
-                                    }
-                                }
-                                Spacer(modifier = Modifier.height(8.dp))
-                                Text(text = title, style = Typography.titleMedium.copy(fontWeight = FontWeight.Bold), color = PearlWhite, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                Text(text = subtitle, style = Typography.bodySmall, color = SmokySilver, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                Text(
+                                    text = "All Waves",
+                                    style = Typography.labelLarge.copy(fontSize = 12.5.sp, fontWeight = FontWeight.Bold),
+                                    color = if (active) PureWhite else SoftSilver
+                                )
+                            }
+                        }
+                        items(REZONA_FREQUENCIES, key = { "freq_$it" }) { mood ->
+                            val isActive = selectedMood == mood
+                            RezonaGlassPill(
+                                isActive = isActive,
+                                onClick = { selectedMood = if (isActive) null else mood }
+                            ) {
+                                Text(
+                                    text = mood,
+                                    style = Typography.labelLarge.copy(fontSize = 12.5.sp, fontWeight = FontWeight.Medium),
+                                    color = if (isActive) PureWhite else SoftSilver
+                                )
                             }
                         }
                     }
                 }
-            }
 
-            // ── 8. "SIMILAR TO <ARTIST>" SECTIONS ────────────────────────────
-            similarArtistSections.forEachIndexed { secIdx, (artistName, artistTracks) ->
-                item(key = "home_similar_$artistName") {
-                    Column(modifier = Modifier.fillMaxWidth()) {
-                        Row(
+                // ── 3. FEATURED VINYL-SLEEVE PRISM HERO DECK ─────────────────────
+                item(key = "home_vinyl_spotlight") {
+                    Crossfade(targetState = spotlightLead, label = "hero_spotlight_xfade") { heroTrack ->
+                        RezonaGlassCard(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .padding(horizontal = 20.dp)
                                 .clickable {
-                                    controller.playQueue(artistTracks, 0, "Similar to $artistName")
+                                    val queueTitle = selectedMood?.let { "$it Frequency" } ?: "Spotlight Mix"
+                                    controller.playQueue(spotlightPool.take(20), 0, queueTitle)
                                 },
-                            verticalAlignment = Alignment.CenterVertically,
-                            horizontalArrangement = Arrangement.SpaceBetween
+                            shape = RoundedCornerShape(28.dp)
                         ) {
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                if (secIdx % 2 == 1) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(16.dp),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                // Sleeve + peeking vinyl disc
+                                Box(
+                                    modifier = Modifier
+                                        .width(122.dp)
+                                        .height(100.dp),
+                                    contentAlignment = Alignment.CenterStart
+                                ) {
+                                    // Peeking dark vinyl disc on right
+                                    Box(
+                                        modifier = Modifier
+                                            .size(88.dp)
+                                            .offset(x = 32.dp)
+                                            .clip(CircleShape)
+                                            .background(
+                                                Brush.radialGradient(
+                                                    listOf(
+                                                        Color(0xFF2B2F3A),
+                                                        Color(0xFF0E1015),
+                                                        Color(0xFF1D2028),
+                                                        Color(0xFF090A0E)
+                                                    )
+                                                )
+                                            )
+                                            .border(1.dp, Color(0x38FFFFFF), CircleShape),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(22.dp)
+                                                .clip(CircleShape)
+                                                .background(Color(0x55FFFFFF))
+                                                .border(1.dp, PureWhite.copy(alpha = 0.6f), CircleShape)
+                                        )
+                                    }
+
+                                    // Front sleeve cover
                                     RezonaAsyncCoverArt(
-                                        coverArtUrl = artistTracks.firstOrNull()?.coverArtUrl.orEmpty(),
-                                        fallbackIndex = secIdx,
-                                        shape = CircleShape,
-                                        modifier = Modifier.size(38.dp)
+                                        coverArtUrl = heroTrack.coverArtUrl,
+                                        fallbackIndex = heroTrack.index,
+                                        shape = RoundedCornerShape(18.dp),
+                                        modifier = Modifier
+                                            .size(98.dp)
+                                            .border(1.dp, SpecularCardBorder, RoundedCornerShape(18.dp))
                                     )
-                                    Spacer(modifier = Modifier.width(10.dp))
                                 }
-                                Column {
-                                    Text(text = "Similar to", style = Typography.bodySmall.copy(fontSize = 11.5.sp), color = SmokySilver)
-                                    Text(text = artistName, style = Typography.titleLarge.copy(fontSize = 20.sp, fontWeight = FontWeight.Bold), color = PureWhite)
+
+                                Spacer(modifier = Modifier.width(14.dp))
+
+                                Column(
+                                    modifier = Modifier.weight(1f),
+                                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                                ) {
+                                    Text(
+                                        text = selectedMood?.let { "$it Session" } ?: "Featured Rotation",
+                                        style = Typography.labelSmall.copy(fontSize = 11.sp, fontWeight = FontWeight.SemiBold),
+                                        color = SoftSilver
+                                    )
+                                    Text(
+                                        text = heroTrack.title,
+                                        style = Typography.titleLarge.copy(fontSize = 17.5.sp, fontWeight = FontWeight.ExtraBold),
+                                        color = PureWhite,
+                                        maxLines = 2,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Text(
+                                        text = heroTrack.artist,
+                                        style = Typography.bodySmall.copy(fontSize = 12.5.sp),
+                                        color = SmokySilver,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                    ) {
+                                        Box(
+                                            modifier = Modifier
+                                                .height(34.dp)
+                                                .clip(CircleShape)
+                                                .background(PureWhite)
+                                                .clickable {
+                                                    val queueTitle = selectedMood?.let { "$it Frequency" } ?: "Spotlight Mix"
+                                                    controller.playQueue(spotlightPool.take(20), 0, queueTitle)
+                                                }
+                                                .padding(horizontal = 14.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                            ) {
+                                                Icon(
+                                                    painter = painterResource(id = R.drawable.ic_play_arrow),
+                                                    contentDescription = null,
+                                                    tint = Color(0xFF07090D),
+                                                    modifier = Modifier.size(15.dp)
+                                                )
+                                                Text(
+                                                    text = "Play Mix",
+                                                    style = Typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                                    color = Color(0xFF07090D)
+                                                )
+                                            }
+                                        }
+                                        Box(
+                                            modifier = Modifier
+                                                .size(34.dp)
+                                                .clip(CircleShape)
+                                                .background(Color(0x1FFFFFFF))
+                                                .border(0.75.dp, Color(0x38FFFFFF), CircleShape)
+                                                .clickable { menuTrack = heroTrack },
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                painter = painterResource(id = R.drawable.ic_more_vert),
+                                                contentDescription = "Options",
+                                                tint = PearlWhite,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
                                 }
                             }
-                            Icon(
-                                painter = painterResource(id = R.drawable.ic_arrow_forward),
-                                contentDescription = "Play $artistName Mix",
-                                tint = PearlWhite,
-                                modifier = Modifier.size(20.dp)
-                            )
                         }
+                    }
+                }
+
+                // ── 4. SPEED DIAL BENTO CAPSULES (2-Row Horizontal Glass Tiles) ──
+                item(key = "home_speed_dial_bento") {
+                    val pairs = remember(speedDialCards) { speedDialCards.chunked(2) }
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        SectionTitleRow(
+                            title = "Speed Dial",
+                            subtitle = "Pinned & instant-play favorites",
+                            actionText = null,
+                            onAction = {}
+                        )
                         Spacer(modifier = Modifier.height(12.dp))
                         LazyRow(
                             contentPadding = PaddingValues(horizontal = 20.dp),
                             horizontalArrangement = Arrangement.spacedBy(12.dp)
                         ) {
-                            items(artistTracks.take(10), key = { "${artistName}_${it.id}" }) { item ->
-                                Column(
-                                    modifier = Modifier
-                                        .width(138.dp)
-                                        .clickable {
-                                            controller.playTrack(item, queueTitle = "Similar to $artistName", autoQueueRadio = true)
+                            items(pairs.size, key = { "sd_col_$it" }) { colIdx ->
+                                val colPair = pairs[colIdx]
+                                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    colPair.forEach { track ->
+                                        GlassSurface(
+                                            variant = GlassSurfaceVariant.Card,
+                                            modifier = Modifier
+                                                .width(232.dp)
+                                                .height(64.dp),
+                                            shape = RoundedCornerShape(20.dp),
+                                            onClick = {
+                                                controller.playTrack(track, queueTitle = "Speed Dial", autoQueueRadio = true)
+                                            }
+                                        ) {
+                                            Row(
+                                                modifier = Modifier
+                                                    .fillMaxSize()
+                                                    .padding(horizontal = 10.dp),
+                                                verticalAlignment = Alignment.CenterVertically
+                                            ) {
+                                                RezonaAsyncCoverArt(
+                                                    coverArtUrl = track.coverArtUrl,
+                                                    fallbackIndex = track.index,
+                                                    shape = RoundedCornerShape(12.dp),
+                                                    modifier = Modifier.size(46.dp)
+                                                )
+                                                Spacer(modifier = Modifier.width(10.dp))
+                                                Column(modifier = Modifier.weight(1f)) {
+                                                    Text(
+                                                        text = track.title,
+                                                        style = Typography.titleMedium.copy(fontSize = 13.5.sp, fontWeight = FontWeight.Bold),
+                                                        color = PureWhite,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                    Text(
+                                                        text = track.artist,
+                                                        style = Typography.bodySmall.copy(fontSize = 11.5.sp),
+                                                        color = SmokySilver,
+                                                        maxLines = 1,
+                                                        overflow = TextOverflow.Ellipsis
+                                                    )
+                                                }
+                                                Icon(
+                                                    painter = painterResource(id = R.drawable.ic_play_arrow),
+                                                    contentDescription = null,
+                                                    tint = SoftSilver,
+                                                    modifier = Modifier.size(16.dp)
+                                                )
+                                            }
                                         }
-                                ) {
-                                    RezonaAsyncCoverArt(
-                                        coverArtUrl = item.coverArtUrl,
-                                        fallbackIndex = item.index,
-                                        shape = RoundedCornerShape(12.dp),
-                                        modifier = Modifier.size(138.dp)
-                                    )
-                                    Spacer(modifier = Modifier.height(6.dp))
-                                    Text(text = item.title, style = Typography.labelMedium.copy(fontWeight = FontWeight.SemiBold), color = PearlWhite, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                    Text(text = item.artist, style = Typography.bodySmall.copy(fontSize = 11.5.sp), color = SmokySilver, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                    }
                                 }
                             }
                         }
                     }
                 }
-            }
 
-            // ── 9. SONG MIX (4 plain rows per page with peek & "Play all") ───
-            item(key = "home_song_mix") {
-                PagedSongMixSection(
-                    title = "Song mix",
-                    tracks = songMixTracks.ifEmpty { REAL_POPULAR_SEEDS },
-                    onPlayAll = {
-                        val list = songMixTracks.ifEmpty { REAL_POPULAR_SEEDS }
-                        controller.playQueue(list, 0, "Song Mix")
-                    },
-                    onPlayTrack = { track, idx ->
-                        val list = songMixTracks.ifEmpty { REAL_POPULAR_SEEDS }
-                        controller.playQueue(list, idx, "Song Mix")
-                    },
-                    onOpenMenu = { menuTrack = it }
-                )
-            }
-
-            // ── 10A. TRENDING SONGS FOR YOU ──────────────────────────────────
-            item(key = "home_trending") {
-                PagedSongMixSection(
-                    title = "Trending songs for you",
-                    tracks = trendingTracks.ifEmpty { REAL_POPULAR_SEEDS },
-                    onPlayAll = {
-                        val list = trendingTracks.ifEmpty { REAL_POPULAR_SEEDS }
-                        controller.playQueue(list, 0, "Trending for You")
-                    },
-                    onPlayTrack = { track, idx ->
-                        val list = trendingTracks.ifEmpty { REAL_POPULAR_SEEDS }
-                        controller.playQueue(list, idx, "Trending for You")
-                    },
-                    onOpenMenu = { menuTrack = it }
-                )
-            }
-
-            // ── 10B. COVERS AND REMIXES ──────────────────────────────────────
-            item(key = "home_covers_remixes") {
-                PagedSongMixSection(
-                    title = "Covers and remixes",
-                    tracks = coversAndRemixes.ifEmpty { REAL_POPULAR_SEEDS.reversed() },
-                    onPlayAll = {
-                        val list = coversAndRemixes.ifEmpty { REAL_POPULAR_SEEDS.reversed() }
-                        controller.playQueue(list, 0, "Covers & Remixes")
-                    },
-                    onPlayTrack = { track, idx ->
-                        val list = coversAndRemixes.ifEmpty { REAL_POPULAR_SEEDS.reversed() }
-                        controller.playQueue(list, idx, "Covers & Remixes")
-                    },
-                    onOpenMenu = { menuTrack = it }
-                )
-            }
-
-            // ── 10C. TRENDING COMMUNITY PLAYLISTS ────────────────────────────
-            if (communityPlaylists.isNotEmpty() || homeSections.size > 1) {
-                item(key = "home_community_playlists") {
-                    val playlistsPool = communityPlaylists.ifEmpty { homeSections.lastOrNull()?.items.orEmpty() }
-                    if (playlistsPool.isNotEmpty()) {
+                // ── 5. SONIC PORTRAIT MIXES (Tall Glass Posters with Frosted Plate) ─
+                if (curatedPosters.isNotEmpty()) {
+                    item(key = "home_sonic_posters") {
                         Column(modifier = Modifier.fillMaxWidth()) {
-                            Text(
-                                text = "Trending community playlists",
-                                style = Typography.titleLarge.copy(fontSize = 21.sp, fontWeight = FontWeight.Bold),
-                                color = PureWhite,
-                                modifier = Modifier.padding(horizontal = 20.dp)
+                            SectionTitleRow(
+                                title = "Curated Sonic Sets",
+                                subtitle = "Blended radio waves from your taste",
+                                actionText = null,
+                                onAction = {}
                             )
-                            Spacer(modifier = Modifier.height(14.dp))
+                            Spacer(modifier = Modifier.height(12.dp))
                             LazyRow(
                                 contentPadding = PaddingValues(horizontal = 20.dp),
                                 horizontalArrangement = Arrangement.spacedBy(14.dp)
                             ) {
-                                items(playlistsPool.take(10), key = { "cpl_${it.id}" }) { pl ->
-                                    Column(
+                                items(curatedPosters, key = { "poster_${it.first}" }) { (title, leadArtist, mixTracks) ->
+                                    Box(
                                         modifier = Modifier
-                                            .width(156.dp)
+                                            .width(168.dp)
+                                            .height(216.dp)
+                                            .clip(RoundedCornerShape(24.dp))
+                                            .border(1.dp, SpecularCardBorder, RoundedCornerShape(24.dp))
                                             .clickable {
-                                                controller.playTrack(pl, queueTitle = pl.title, autoQueueRadio = true)
+                                                controller.playQueue(mixTracks, 0, title)
                                             }
                                     ) {
                                         RezonaAsyncCoverArt(
-                                            coverArtUrl = pl.coverArtUrl,
-                                            fallbackIndex = pl.index,
-                                            shape = RoundedCornerShape(14.dp),
-                                            modifier = Modifier.size(156.dp)
+                                            coverArtUrl = mixTracks.firstOrNull()?.coverArtUrl.orEmpty(),
+                                            fallbackIndex = 0,
+                                            shape = RoundedCornerShape(24.dp),
+                                            modifier = Modifier.fillMaxSize()
                                         )
-                                        Spacer(modifier = Modifier.height(8.dp))
-                                        Text(text = pl.title, style = Typography.titleMedium.copy(fontWeight = FontWeight.SemiBold), color = PearlWhite, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                                        Text(text = pl.artist, style = Typography.bodySmall, color = SmokySilver, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                                        Box(
+                                            modifier = Modifier
+                                                .fillMaxWidth()
+                                                .fillMaxHeight(0.54f)
+                                                .align(Alignment.BottomCenter)
+                                                .background(
+                                                    Brush.verticalGradient(
+                                                        listOf(
+                                                            Color.Transparent,
+                                                            Color(0xCC080A10),
+                                                            Color(0xF206080C)
+                                                        )
+                                                    )
+                                                )
+                                                .padding(14.dp)
+                                        ) {
+                                            Column(
+                                                modifier = Modifier.align(Alignment.BottomStart)
+                                            ) {
+                                                Text(
+                                                    text = title,
+                                                    style = Typography.titleMedium.copy(fontSize = 15.sp, fontWeight = FontWeight.ExtraBold),
+                                                    color = PureWhite,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                                Text(
+                                                    text = "With $leadArtist",
+                                                    style = Typography.bodySmall.copy(fontSize = 11.5.sp),
+                                                    color = SoftSilver,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                        }
+                                        Box(
+                                            modifier = Modifier
+                                                .align(Alignment.TopEnd)
+                                                .padding(10.dp)
+                                                .size(34.dp)
+                                                .clip(CircleShape)
+                                                .background(Color(0x9906080C))
+                                                .border(0.8.dp, SpecularCardBorder, CircleShape),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Icon(
+                                                painter = painterResource(id = R.drawable.ic_play_arrow),
+                                                contentDescription = "Play $title",
+                                                tint = PureWhite,
+                                                modifier = Modifier.size(16.dp)
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ── 6. HEAVY ROTATION CHART DECKS (Numbered Frosted Cards) ───────
+                item(key = "home_rotation_charts") {
+                    val chartPool = remember(staplesSource, songMixTracks) {
+                        (staplesSource + songMixTracks).distinctBy { it.id }.take(12)
+                    }
+                    FrostedChartDeckSection(
+                        title = "Heavy Rotation",
+                        subtitle = "Your top-spun tracks right now",
+                        tracks = chartPool,
+                        onPlayAll = { controller.playQueue(chartPool, 0, "Heavy Rotation") },
+                        onPlayTrack = { idx -> controller.playQueue(chartPool, idx, "Heavy Rotation") },
+                        onOpenMenu = { menuTrack = it }
+                    )
+                }
+
+                // ── 7. TRENDING WAVES DECK ───────────────────────────────────────
+                item(key = "home_trending_deck") {
+                    val list = trendingTracks.ifEmpty { REAL_POPULAR_SEEDS }
+                    FrostedChartDeckSection(
+                        title = "Trending Waves",
+                        subtitle = "Breakout tracks across YouTube Music",
+                        tracks = list.take(12),
+                        onPlayAll = { controller.playQueue(list, 0, "Trending Waves") },
+                        onPlayTrack = { idx -> controller.playQueue(list, idx, "Trending Waves") },
+                        onOpenMenu = { menuTrack = it }
+                    )
+                }
+
+                // ── 8. ARTIST ORBIT SECTIONS ─────────────────────────────────────
+                similarArtistSections.forEach { (artistName, artistTracks) ->
+                    item(key = "home_orbit_$artistName") {
+                        Column(modifier = Modifier.fillMaxWidth()) {
+                            SectionTitleRow(
+                                title = "Orbiting $artistName",
+                                subtitle = " kindred artists & sonic matches",
+                                actionText = "Play Radio",
+                                onAction = { controller.playQueue(artistTracks, 0, "$artistName Orbit") }
+                            )
+                            Spacer(modifier = Modifier.height(12.dp))
+                            LazyRow(
+                                contentPadding = PaddingValues(horizontal = 20.dp),
+                                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                            ) {
+                                items(artistTracks.take(10), key = { "${artistName}_${it.id}" }) { item ->
+                                    RezonaGlassCard(
+                                        modifier = Modifier
+                                            .width(146.dp)
+                                            .clickable {
+                                                controller.playTrack(item, queueTitle = "$artistName Orbit", autoQueueRadio = true)
+                                            },
+                                        shape = RoundedCornerShape(20.dp)
+                                    ) {
+                                        Column(modifier = Modifier.padding(10.dp)) {
+                                            RezonaAsyncCoverArt(
+                                                coverArtUrl = item.coverArtUrl,
+                                                fallbackIndex = item.index,
+                                                shape = RoundedCornerShape(14.dp),
+                                                modifier = Modifier.size(126.dp)
+                                            )
+                                            Spacer(modifier = Modifier.height(8.dp))
+                                            Text(
+                                                text = item.title,
+                                                style = Typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                                color = PureWhite,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                            Text(
+                                                text = item.artist,
+                                                style = Typography.bodySmall.copy(fontSize = 11.sp),
+                                                color = SmokySilver,
+                                                maxLines = 1,
+                                                overflow = TextOverflow.Ellipsis
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ── 9. COVERS, REMIXES & COMMUNITY CRATES ────────────────────────
+                item(key = "home_covers_deck") {
+                    val list = coversAndRemixes.ifEmpty { REAL_POPULAR_SEEDS.reversed() }
+                    FrostedChartDeckSection(
+                        title = "Reworks & Unplugged",
+                        subtitle = "Live sessions, acoustic takes & remixes",
+                        tracks = list.take(12),
+                        onPlayAll = { controller.playQueue(list, 0, "Reworks & Unplugged") },
+                        onPlayTrack = { idx -> controller.playQueue(list, idx, "Reworks & Unplugged") },
+                        onOpenMenu = { menuTrack = it }
+                    )
+                }
+
+                if (communityPlaylists.isNotEmpty() || homeSections.size > 1) {
+                    item(key = "home_community_crates") {
+                        val playlistsPool = communityPlaylists.ifEmpty { homeSections.lastOrNull()?.items.orEmpty() }
+                        if (playlistsPool.isNotEmpty()) {
+                            Column(modifier = Modifier.fillMaxWidth()) {
+                                SectionTitleRow(
+                                    title = "Community Crates",
+                                    subtitle = "Handpicked late-night & indie playlists",
+                                    actionText = null,
+                                    onAction = {}
+                                )
+                                Spacer(modifier = Modifier.height(12.dp))
+                                LazyRow(
+                                    contentPadding = PaddingValues(horizontal = 20.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                                ) {
+                                    items(playlistsPool.take(10), key = { "cpl_${it.id}" }) { pl ->
+                                        RezonaGlassCard(
+                                            modifier = Modifier
+                                                .width(156.dp)
+                                                .clickable {
+                                                    controller.playTrack(pl, queueTitle = pl.title, autoQueueRadio = true)
+                                                },
+                                            shape = RoundedCornerShape(22.dp)
+                                        ) {
+                                            Column(modifier = Modifier.padding(10.dp)) {
+                                                RezonaAsyncCoverArt(
+                                                    coverArtUrl = pl.coverArtUrl,
+                                                    fallbackIndex = pl.index,
+                                                    shape = RoundedCornerShape(14.dp),
+                                                    modifier = Modifier.size(136.dp)
+                                                )
+                                                Spacer(modifier = Modifier.height(8.dp))
+                                                Text(
+                                                    text = pl.title,
+                                                    style = Typography.titleMedium.copy(fontSize = 13.5.sp, fontWeight = FontWeight.Bold),
+                                                    color = PearlWhite,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                                Text(
+                                                    text = pl.artist,
+                                                    style = Typography.bodySmall.copy(fontSize = 11.5.sp),
+                                                    color = SmokySilver,
+                                                    maxLines = 1,
+                                                    overflow = TextOverflow.Ellipsis
+                                                )
+                                            }
+                                        }
                                     }
                                 }
                             }
@@ -867,7 +917,6 @@ fun RezonaHomeScreen(
                     }
                 }
             }
-        }
         }
 
         Box(
@@ -898,103 +947,144 @@ fun RezonaHomeScreen(
     }
 }
 
+@Composable
+private fun SectionTitleRow(
+    title: String,
+    subtitle: String,
+    actionText: String?,
+    onAction: () -> Unit
+) {
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(horizontal = 20.dp),
+        horizontalArrangement = Arrangement.SpaceBetween,
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Column(modifier = Modifier.weight(1f)) {
+            Text(
+                text = title,
+                style = Typography.titleLarge.copy(fontSize = 20.sp, fontWeight = FontWeight.ExtraBold),
+                color = PureWhite,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = subtitle,
+                style = Typography.bodySmall.copy(fontSize = 12.sp),
+                color = SmokySilver,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        if (!actionText.isNullOrBlank()) {
+            RezonaGlassPill(isActive = false, onClick = onAction) {
+                Text(
+                    text = actionText,
+                    style = Typography.labelMedium.copy(fontSize = 12.sp, fontWeight = FontWeight.SemiBold),
+                    color = PearlWhite
+                )
+            }
+        }
+    }
+}
+
 /**
- * 4-rows-per-page HorizontalPager with next-page peek & "Play all" header (home_3.jpg).
- * Strictly unboxed plain rows directly on the continuous ambient background.
+ * Swipeable Frosted Glass Chart Deck: 4 numbered tracks per glass card (`01`..`04`, `05`..`08`).
  */
 @Composable
-private fun PagedSongMixSection(
+private fun FrostedChartDeckSection(
     title: String,
+    subtitle: String,
     tracks: List<RezonaTrack>,
     onPlayAll: () -> Unit,
-    onPlayTrack: (RezonaTrack, Int) -> Unit,
+    onPlayTrack: (Int) -> Unit,
     onOpenMenu: (RezonaTrack) -> Unit
 ) {
     val pages = remember(tracks) { tracks.chunked(4) }
     val pagerState = rememberPagerState(pageCount = { pages.size.coerceAtLeast(1) })
 
     Column(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(horizontal = 20.dp),
-            horizontalArrangement = Arrangement.SpaceBetween,
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            Text(
-                text = title,
-                style = Typography.titleLarge.copy(fontSize = 21.sp, fontWeight = FontWeight.Bold),
-                color = PureWhite,
-                modifier = Modifier.weight(1f),
-                maxLines = 1,
-                overflow = TextOverflow.Ellipsis
-            )
-            Text(
-                text = "Play all",
-                style = Typography.labelLarge.copy(fontSize = 13.sp, fontWeight = FontWeight.SemiBold),
-                color = PearlWhite.copy(alpha = 0.9f),
-                modifier = Modifier
-                    .clip(RoundedCornerShape(14.dp))
-                    .clickable(onClick = onPlayAll)
-                    .padding(horizontal = 10.dp, vertical = 6.dp)
-            )
-        }
-
-        Spacer(modifier = Modifier.height(10.dp))
+        SectionTitleRow(
+            title = title,
+            subtitle = subtitle,
+            actionText = "Play Deck",
+            onAction = onPlayAll
+        )
+        Spacer(modifier = Modifier.height(12.dp))
 
         HorizontalPager(
             state = pagerState,
-            contentPadding = PaddingValues(start = 20.dp, end = 44.dp),
+            contentPadding = PaddingValues(start = 20.dp, end = 36.dp),
             pageSpacing = 14.dp
         ) { pageIdx ->
             val pageRows = pages[pageIdx]
-            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
-                pageRows.forEachIndexed { localIdx, item ->
-                    val globalIdx = (pageIdx * 4) + localIdx
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .clip(RoundedCornerShape(10.dp))
-                            .clickable { onPlayTrack(item, globalIdx) }
-                            .padding(vertical = 2.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        RezonaAsyncCoverArt(
-                            coverArtUrl = item.coverArtUrl,
-                            fallbackIndex = item.index,
-                            shape = RoundedCornerShape(8.dp),
-                            modifier = Modifier.size(52.dp)
-                        )
-                        Spacer(modifier = Modifier.width(12.dp))
-                        Column(modifier = Modifier.weight(1f)) {
-                            Text(
-                                text = item.title,
-                                style = Typography.titleMedium.copy(fontSize = 14.5.sp, fontWeight = FontWeight.SemiBold),
-                                color = PearlWhite,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            Text(
-                                text = item.artist,
-                                style = Typography.bodySmall.copy(fontSize = 12.sp),
-                                color = SmokySilver,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                        }
-                        Box(
+            RezonaGlassCard(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(24.dp)
+            ) {
+                Column(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 14.dp, vertical = 12.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    pageRows.forEachIndexed { localIdx, item ->
+                        val globalIdx = (pageIdx * 4) + localIdx
+                        Row(
                             modifier = Modifier
-                                .size(44.dp)
-                                .clip(CircleShape)
-                                .clickable { onOpenMenu(item) },
-                            contentAlignment = Alignment.Center
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .clickable { onPlayTrack(globalIdx) }
+                                .padding(vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(
-                                painter = painterResource(id = R.drawable.ic_more_vert),
-                                contentDescription = "More options",
-                                tint = SoftSilver,
-                                modifier = Modifier.size(19.dp)
+                            Text(
+                                text = "%02d".format(globalIdx + 1),
+                                style = Typography.labelLarge.copy(fontSize = 12.5.sp, fontWeight = FontWeight.Bold),
+                                color = SoftSilver.copy(alpha = 0.78f),
+                                modifier = Modifier.width(26.dp)
                             )
+                            RezonaAsyncCoverArt(
+                                coverArtUrl = item.coverArtUrl,
+                                fallbackIndex = item.index,
+                                shape = RoundedCornerShape(10.dp),
+                                modifier = Modifier.size(46.dp)
+                            )
+                            Spacer(modifier = Modifier.width(12.dp))
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = item.title,
+                                    style = Typography.titleMedium.copy(fontSize = 14.sp, fontWeight = FontWeight.SemiBold),
+                                    color = PureWhite,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Text(
+                                    text = item.artist,
+                                    style = Typography.bodySmall.copy(fontSize = 11.5.sp),
+                                    color = SmokySilver,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(CircleShape)
+                                    .clickable { onOpenMenu(item) },
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    painter = painterResource(id = R.drawable.ic_more_vert),
+                                    contentDescription = "Track Options",
+                                    tint = SoftSilver,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                            }
+                        }
+                        if (localIdx < pageRows.lastIndex) {
+                            RezonaHairlineDivider(startIndent = 84.dp)
                         }
                     }
                 }
