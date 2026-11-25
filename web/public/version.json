@@ -1,18 +1,21 @@
 ﻿{
-    "versionCode":  2,
-    "versionName":  "1.0.2",
-    "announcementId":  "rezona-v1.0.2-202611252039",
-    "title":  "Update Rezona V1.0.2",
+    "versionCode":  3,
+    "versionName":  "1.0.3",
+    "announcementId":  "rezona-v1.0.3-202611252045",
+    "title":  "Rezona Studio Prism \u0026 Dynamic Island Update",
     "apkUrl":  "https://rezona-music-web.vercel.app",
     "added":  [
-                  "Fitur A",
-                  "Fitur B"
+                  "Spatial Prism \u0026 Vinyl Studio UI Redesign",
+                  "Giant 120fps Spinning Vinyl Record in Now Playing",
+                  "In-app Update \u0026 Announcement system with Android System Notification"
               ],
     "fixed":  [
-                  "Bug X"
+                  "Dynamic Island anti-ketimpa kapsul bawaan HP",
+                  "Adsterra native banner layout on download web"
               ],
     "improved":  [
-                     "UI Y"
+                     "Bigger 84% vinyl record platter with smooth 120fps continuous rotation \u0026 turntable inertia",
+                     "Smart Camera Cutout placement"
                  ],
-    "changelog":  "1. Add :\n- Fitur A\n- Fitur B\n\n2. Fix :\n- Bug X\n\n3. Improved :\n- UI Y\n\nInstall ulang di : https://rezona-music-web.vercel.app"
+    "changelog":  "1. Add :\n- Spatial Prism \u0026 Vinyl Studio UI Redesign\n- Giant 120fps Spinning Vinyl Record in Now Playing\n- In-app Update \u0026 Announcement system with Android System Notification\n\n2. Fix :\n- Dynamic Island anti-ketimpa kapsul bawaan HP\n- Adsterra native banner layout on download web\n\n3. Improved :\n- Bigger 84% vinyl record platter with smooth 120fps continuous rotation \u0026 turntable inertia\n- Smart Camera Cutout placement\n\nInstall ulang di : https://rezona-music-web.vercel.app"
 }
