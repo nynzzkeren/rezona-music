@@ -1,14 +1,12 @@
 package com.nayama.music.ui.components
 
-import androidx.compose.animation.core.LinearEasing
-import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateDpAsState
-import androidx.compose.animation.core.animateFloat
 import androidx.compose.animation.core.animateFloatAsState
-import androidx.compose.animation.core.infiniteRepeatable
-import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
@@ -79,13 +77,25 @@ fun RezonaMiniPlayer(
     val duration = controller.durationMs.longValue
     val progressFraction = if (duration > 0) (currentPosition.toFloat() / duration.toFloat()).coerceIn(0f, 1f) else 0f
 
-    val spinTransition = rememberInfiniteTransition(label = "mini_vinyl_spin")
-    val spinDeg by spinTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(tween(8000, easing = LinearEasing), RepeatMode.Restart),
-        label = "mini_deg"
+    val spinDeg = remember { mutableFloatStateOf(0f) }
+    val smoothSpeed by animateFloatAsState(
+        targetValue = if (isPlaying) 28f else 0f,
+        animationSpec = tween(durationMillis = 550, easing = FastOutSlowInEasing),
+        label = "mini_vinyl_speed"
     )
+    LaunchedEffect(isPlaying, smoothSpeed > 0.05f) {
+        if (!isPlaying && smoothSpeed <= 0.05f) return@LaunchedEffect
+        var lastNanos = 0L
+        while (isPlaying || smoothSpeed > 0.05f) {
+            withFrameNanos { nowNanos ->
+                if (lastNanos != 0L) {
+                    val dt = ((nowNanos - lastNanos) / 1_000_000_000f).coerceIn(0f, 0.06f)
+                    spinDeg.floatValue = (spinDeg.floatValue + smoothSpeed * dt) % 360f
+                }
+                lastNanos = nowNanos
+            }
+        }
+    }
 
     var dragOffsetX by remember { mutableFloatStateOf(0f) }
     val animatedOffsetX by animateFloatAsState(
@@ -174,7 +184,7 @@ fun RezonaMiniPlayer(
                         modifier = Modifier
                             .size(discSize)
                             .graphicsLayer {
-                                rotationZ = if (isPlaying) spinDeg else 0f
+                                rotationZ = spinDeg.floatValue
                             }
                             .clip(CircleShape)
                             .border(width = 1.dp, brush = SpecularCardBorder, shape = CircleShape),

@@ -234,7 +234,11 @@ class NayamaMediaService : Service() {
             builder.setLargeIcon(artworkBitmap)
         }
 
-        if (mediaSession != null) {
+        // When Rezona's own Dynamic Island Overlay is active outside the app, omit MediaStyle(mediaSession)
+        // from the notification so OEM SystemUI (Xiaomi HyperOS / Realme / ColorOS / Vivo) and third-party
+        // Dynamic Island apps do NOT spawn a duplicate black media capsule on top of Rezona's Dynamic Island!
+        val suppressSystemCapsule = com.nayama.music.overlay.RezonaDynamicIslandService.isOverlayRunning()
+        if (mediaSession != null && !suppressSystemCapsule) {
             builder.setStyle(
                 MediaStyleNotificationHelper.MediaStyle(mediaSession)
                     .setShowActionsInCompactView(0, 1, 2)

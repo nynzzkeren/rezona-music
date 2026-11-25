@@ -262,6 +262,24 @@ class PlayerV3Test {
         val infoSame = RezonaUpdateChecker.parseAndCheck(updateJson, currentVersionCode = 2)
         assertNull(infoSame)
 
+        val bulletinJson = """
+            {
+              "versionCode": 2,
+              "versionName": "1.0.2",
+              "announcementId": "ann-20261125",
+              "title": "Update Rezona V1.0.2",
+              "added": ["Giant Spinning Vinyl"],
+              "fixed": ["Dynamic Island anti-overlap"],
+              "improved": ["Smooth 120fps rotation"]
+            }
+        """.trimIndent()
+        val bulletin = RezonaUpdateChecker.parseBulletin(bulletinJson, currentVersionCode = 2)
+        assertNotNull(bulletin)
+        assertEquals("ann-20261125", bulletin?.announcementId)
+        assertEquals(listOf("Giant Spinning Vinyl"), bulletin?.added)
+        assertEquals(listOf("Dynamic Island anti-overlap"), bulletin?.fixed)
+        assertEquals(listOf("Smooth 120fps rotation"), bulletin?.improved)
+
         val gtxJson = """[[["Aku merindukanmu\n","I miss you\n",null,null,10],["Malam ini","Tonight",null,null,10]],null,"en"]"""
         val translated = com.nayama.music.backend.LyricLanguageHelper.parseGtxTranslationJson(gtxJson)
         assertEquals("Aku merindukanmu\nMalam ini", translated)

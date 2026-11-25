@@ -163,9 +163,15 @@ fun RezonaApp() {
 
     LaunchedEffect(Unit) {
         val dismissedVersion = preferences.dismissedUpdateVersionFlow.first()
+        val dismissedAnnouncement = preferences.dismissedAnnouncementIdFlow.first()
         val info = RezonaUpdateChecker.checkForUpdate()
-        if (info != null && info.versionCode > dismissedVersion) {
-            availableUpdate = info
+        if (info != null) {
+            val isUnreadAnnouncement = info.announcementId.isNotBlank() && info.announcementId != dismissedAnnouncement
+            val isUnreadUpdate = info.isNewerApk && info.versionCode > dismissedVersion
+            if (isUnreadUpdate || isUnreadAnnouncement) {
+                availableUpdate = info
+                RezonaUpdateChecker.postSystemAnnouncementNotification(context, info)
+            }
         }
     }
 
@@ -442,31 +448,71 @@ fun RezonaApp() {
                 }
             }
 
-            // 8. In-App Update Notifier
+            // 8. In-App Update & Announcement Bulletin Notifier
             availableUpdate?.let { updateInfo ->
+                val markSeen: () -> Unit = {
+                    scope.launch {
+                        preferences.setDismissedUpdateVersion(updateInfo.versionCode)
+                        if (updateInfo.announcementId.isNotBlank()) {
+                            preferences.setDismissedAnnouncementId(updateInfo.announcementId)
+                        }
+                    }
+                    availableUpdate = null
+                }
                 RezonaGlassDialog(
-                    title = "Update Available · v${updateInfo.versionName}",
-                    onDismissRequest = {
-                        scope.launch {
-                            preferences.setDismissedUpdateVersion(updateInfo.versionCode)
-                        }
-                        availableUpdate = null
-                    },
-                    confirmText = "Download APK",
+                    title = updateInfo.title.ifBlank { "Update Rezona v${updateInfo.versionName}" },
+                    onDismissRequest = markSeen,
+                    confirmText = if (updateInfo.isNewerApk) "Update APK" else "Got It",
                     onConfirm = {
-                        runCatching {
-                            val intent = Intent(Intent.ACTION_VIEW, Uri.parse(updateInfo.apkUrl))
-                            context.startActivity(intent)
+                        if (updateInfo.isNewerApk) {
+                            runCatching {
+                                val intent = Intent(Intent.ACTION_VIEW, Uri.parse(updateInfo.apkUrl))
+                                context.startActivity(intent)
+                            }
                         }
-                        availableUpdate = null
+                        markSeen()
                     },
-                    dismissText = "Later"
+                    dismissText = if (updateInfo.isNewerApk) "Later" else null
                 ) {
-                    Text(
-                        text = updateInfo.changelog,
-                        style = Typography.bodyMedium,
-                        color = PearlWhite
-                    )
+                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        if (updateInfo.added.isNotEmpty()) {
+                            Text(
+                                text = "1. Add :",
+                                style = Typography.labelLarge.copy(fontWeight = FontWeight.ExtraBold),
+                                color = PureWhite
+                            )
+                            updateInfo.added.forEach { item ->
+                                Text("• $item", style = Typography.bodySmall, color = PearlWhite)
+                            }
+                        }
+                        if (updateInfo.fixed.isNotEmpty()) {
+                            Text(
+                                text = "2. Fix :",
+                                style = Typography.labelLarge.copy(fontWeight = FontWeight.ExtraBold),
+                                color = PureWhite
+                            )
+                            updateInfo.fixed.forEach { item ->
+                                Text("• $item", style = Typography.bodySmall, color = PearlWhite)
+                            }
+                        }
+                        if (updateInfo.improved.isNotEmpty()) {
+                            Text(
+                                text = "3. Improved :",
+                                style = Typography.labelLarge.copy(fontWeight = FontWeight.ExtraBold),
+                                color = PureWhite
+                            )
+                            updateInfo.improved.forEach { item ->
+                                Text("• $item", style = Typography.bodySmall, color = PearlWhite)
+                            }
+                        }
+                        if (updateInfo.changelog.isNotBlank()) {
+                            Text(
+                                text = updateInfo.changelog,
+                                style = Typography.bodySmall,
+                                color = SoftSilver
+                            )
+                        }
+                    }
                 }
             }
         }

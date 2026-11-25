@@ -116,6 +116,16 @@ class NayamaApplication : Application(), ImageLoaderFactory {
 
                 val notificationManager = getSystemService(NotificationManager::class.java)
                 notificationManager?.createNotificationChannel(channel)
+
+                val announcementChannel = NotificationChannel(
+                    ANNOUNCEMENT_CHANNEL_ID,
+                    "Rezona Updates & Announcements",
+                    NotificationManager.IMPORTANCE_DEFAULT
+                ).apply {
+                    description = "New APK updates, feature announcements, and changelogs"
+                    setShowBadge(true)
+                }
+                notificationManager?.createNotificationChannel(announcementChannel)
             } catch (e: Exception) {
                 Log.e("NayamaApp", "Failed to create notification channel", e)
             }
@@ -124,6 +134,8 @@ class NayamaApplication : Application(), ImageLoaderFactory {
 
     companion object {
         const val PLAYBACK_CHANNEL_ID = "nayama_playback_channel"
+        const val ANNOUNCEMENT_CHANNEL_ID = "rezona_announcement_channel"
         const val NOTIFICATION_ID = 1001
+        const val ANNOUNCEMENT_NOTIFICATION_ID = 1002
     }
 }

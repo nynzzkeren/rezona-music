@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Rezona Admin — Update &amp; Announcement Studio</title>
+    <link rel="icon" type="image/png" href="/logo.png">
+    <style>
+        :root {
+            color-scheme: dark;
+            --obsidian: #050608;
+            --pure-white: #FFFFFF;
+            --pearl: #F2F4F8;
+            --soft-silver: #A4ACB9;
+            --muted: #6C7484;
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            padding: 28px 16px 48px;
+            min-height: 100vh;
+            background: radial-gradient(circle at 50% 0%, rgba(255,255,255,0.08) 0%, #050608 60%);
+            color: var(--pearl);
+            font-family: 'Satoshi', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+        }
+        .studio-card {
+            width: 100%;
+            max-width: 560px;
+            border-radius: 28px;
+            padding: 26px 22px;
+            background: linear-gradient(155deg, rgba(255,255,255,0.12) 0%, rgba(255,255,255,0.04) 100%);
+            backdrop-filter: blur(28px);
+            border: 1px solid rgba(255,255,255,0.22);
+            box-shadow: 0 24px 64px rgba(0,0,0,0.8);
+        }
+        h1 { margin: 0 0 4px; font-size: 22px; color: var(--pure-white); }
+        .sub { margin: 0 0 18px; font-size: 12.5px; color: var(--soft-silver); }
+        .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+        label { display: block; font-size: 11.5px; font-weight: 700; color: var(--soft-silver); margin: 12px 0 5px; }
+        input, textarea {
+            width: 100%;
+            border-radius: 14px;
+            border: 1px solid rgba(255,255,255,0.18);
+            background: rgba(0,0,0,0.35);
+            color: var(--pure-white);
+            padding: 10px 12px;
+            font-size: 13px;
+            font-family: inherit;
+        }
+        textarea { min-height: 70px; resize: vertical; }
+        .btn-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 16px; }
+        button {
+            flex: 1;
+            min-width: 150px;
+            padding: 12px 14px;
+            border-radius: 999px;
+            border: 1px solid rgba(255,255,255,0.25);
+            background: rgba(255,255,255,0.12);
+            color: var(--pure-white);
+            font-weight: 700;
+            font-size: 12.5px;
+            cursor: pointer;
+        }
+        button.primary {
+            background: var(--pure-white);
+            color: #06080C;
+        }
+        pre {
+            margin-top: 16px;
+            padding: 14px;
+            border-radius: 16px;
+            background: rgba(0,0,0,0.55);
+            border: 1px solid rgba(255,255,255,0.14);
+            font-size: 12px;
+            white-space: pre-wrap;
+            word-break: break-word;
+            color: var(--pearl);
+        }
+        .toast { font-size: 12px; color: #8FF0A4; margin-top: 8px; min-height: 18px; }
+    </style>
+</head>
+<body>
+    <main class="studio-card">
+        <h1>Rezona Admin Studio</h1>
+        <p class="sub">Buat pengumuman In-App APK &amp; format teks Community (WA / Discord) secara otomatis.</p>
+
+        <div class="grid-2">
+            <div>
+                <label for="verName">Version Name</label>
+                <input id="verName" type="text" value="1.0.2">
+            </div>
+            <div>
+                <label for="verCode">Version Code (angka)</label>
+                <input id="verCode" type="number" value="2">
+            </div>
+        </div>
+
+        <label for="titleInput">Judul Announcement di APK &amp; Community</label>
+        <input id="titleInput" type="text" value="Update Rezona V1.0.2">
+
+        <label for="addInput">1. Add (1 baris = 1 fitur baru)</label>
+        <textarea id="addInput">Spatial Prism & Vinyl Studio UI Redesign (Home, Discover, Vault, Passport, Now Playing)
+Giant 120fps Continuous-Spin Hi-Fi Vinyl Record di Now Playing
+In-App Announcement & Changelog Bulletin System</textarea>
+
+        <label for="fixInput">2. Fix (1 baris = 1 bug fix)</label>
+        <textarea id="fixInput">Dynamic Island anti-ketimpa (mencegah kapsul media bawaan HP menimpa Dynamic Island Rezona)
+Settings & Sync Status background tembus bayang
+Google Sign-In release resource & real-time Lyrics Translation</textarea>
+
+        <label for="impInput">3. Improved (1 baris = 1 peningkatan)</label>
+        <textarea id="impInput">Smart Camera Cutout placement (Overlap Floating Camera vs Below Camera)
+Play count & waktu putar musik di Passport Stats & History
+Double-back to exit protection</textarea>
+
+        <label for="noteInput">Catatan Tambahan / Link Download</label>
+        <input id="noteInput" type="text" value="Install ulang di : https://rezona-music-web.vercel.app">
+
+        <div class="btn-row">
+            <button type="button" class="primary" id="copyCommunityBtn">Copy Teks Community (WA/Discord)</button>
+            <button type="button" id="copyJsonBtn">Copy version.json (In-App Popup)</button>
+        </div>
+        <div class="toast" id="statusToast"></div>
+
+        <label>Preview Format Community &amp; In-App Bulletin</label>
+        <pre id="previewBox"></pre>
+    </main>
+
+    <script>
+        (function () {
+            const verName = document.getElementById('verName');
+            const verCode = document.getElementById('verCode');
+            const titleInput = document.getElementById('titleInput');
+            const addInput = document.getElementById('addInput');
+            const fixInput = document.getElementById('fixInput');
+            const impInput = document.getElementById('impInput');
+            const noteInput = document.getElementById('noteInput');
+            const previewBox = document.getElementById('previewBox');
+            const toast = document.getElementById('statusToast');
+
+            function parseLines(el) {
+                return el.value.split('\n').map(s => s.trim().replace(/^[-•]\s*/, '')).filter(Boolean);
+            }
+
+            function buildCommunityText() {
+                const adds = parseLines(addInput).map(x => '- ' + x).join('\n') || '- -';
+                const fixes = parseLines(fixInput).map(x => '- ' + x).join('\n') || '- -';
+                const imps = parseLines(impInput).map(x => '- ' + x).join('\n') || '- -';
+                return `# ${titleInput.value.trim()}\n1. Add :\n${adds}\n\n2. Fix :\n${fixes}\n\n3. Improved :\n${imps}\n\n${noteInput.value.trim()}`;
+            }
+
+            function buildVersionJson() {
+                const vName = verName.value.trim() || '1.0.2';
+                const vCode = parseInt(verCode.value, 10) || 2;
+                const stamp = new Date().toISOString().slice(0, 16).replace(/[-:T]/g, '');
+                return JSON.stringify({
+                    versionCode: vCode,
+                    versionName: vName,
+                    announcementId: `rezona-v${vName}-${stamp}`,
+                    title: titleInput.value.trim() || `Update Rezona V${vName}`,
+                    apkUrl: 'https://rezona-music-web.vercel.app',
+                    added: parseLines(addInput),
+                    fixed: parseLines(fixInput),
+                    improved: parseLines(impInput),
+                    changelog: noteInput.value.trim()
+                }, null, 2);
+            }
+
+            function refresh() {
+                previewBox.textContent = buildCommunityText();
+            }
+
+            [verName, verCode, titleInput, addInput, fixInput, impInput, noteInput].forEach(el => {
+                el.addEventListener('input', refresh);
+            });
+            refresh();
+
+            document.getElementById('copyCommunityBtn').addEventListener('click', async () => {
+                await navigator.clipboard.writeText(buildCommunityText());
+                toast.textContent = 'Teks Community berhasil di-copy!';
+            });
+
+            document.getElementById('copyJsonBtn').addEventListener('click', async () => {
+                const json = buildVersionJson();
+                previewBox.textContent = json;
+                await navigator.clipboard.writeText(json);
+                toast.textContent = 'version.json berhasil di-copy! Simpan ke web/public/version.json lalu git push.';
+            });
+        })();
+    </script>
+</body>
+</html>

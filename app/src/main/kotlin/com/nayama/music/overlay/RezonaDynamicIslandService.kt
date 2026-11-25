@@ -170,6 +170,7 @@ class RezonaDynamicIslandService : Service(), LifecycleOwner, SavedStateRegistry
 
     override fun onCreate() {
         super.onCreate()
+        overlayRunningFlow.value = true
         savedStateRegistryController.performRestore(null)
         lifecycleRegistry.currentState = Lifecycle.State.CREATED
         lifecycleRegistry.currentState = Lifecycle.State.STARTED
@@ -245,7 +246,8 @@ class RezonaDynamicIslandService : Service(), LifecycleOwner, SavedStateRegistry
             return
         }
 
-        // Drive visibility + cutout positioning from serviceScope on Main thread (never freezes!)
+        // Drive visibility + cutout positioning + topmost Z-order re-assertion from serviceScope
+        var wasVisible = false
         serviceScope.launch {
             combine(
                 appInForegroundFlow,
@@ -273,9 +275,18 @@ class RezonaDynamicIslandService : Service(), LifecycleOwner, SavedStateRegistry
                     v.visibility = targetVis
                     if (!visible) isExpandedFlow.value = false
                 }
-                if (layoutChanged) {
+                // Re-attach window to front of WindowManager Z-order stack whenever becoming visible or expanding
+                if (visible && (!wasVisible || expanded)) {
+                    runCatching {
+                        wm.removeViewImmediate(v)
+                        wm.addView(v, p)
+                    }.onFailure {
+                        runCatching { wm.updateViewLayout(v, p) }
+                    }
+                } else if (layoutChanged) {
                     runCatching { wm.updateViewLayout(v, p) }
                 }
+                wasVisible = visible
             }
         }
     }
@@ -297,6 +308,7 @@ class RezonaDynamicIslandService : Service(), LifecycleOwner, SavedStateRegistry
     }
 
     override fun onDestroy() {
+        overlayRunningFlow.value = false
         serviceScope.cancel()
         composeView?.let { v ->
             runCatching { windowManager?.removeView(v) }
@@ -401,6 +413,9 @@ class RezonaDynamicIslandService : Service(), LifecycleOwner, SavedStateRegistry
         private const val ACTION_PREVIEW = "com.nayama.music.overlay.ACTION_PREVIEW_ISLAND"
         private val appInForegroundFlow = MutableStateFlow(true)
         private val previewUntilMsFlow = MutableStateFlow(0L)
+        private val overlayRunningFlow = MutableStateFlow(false)
+
+        fun isOverlayRunning(): Boolean = overlayRunningFlow.value
 
         fun setAppInForeground(inForeground: Boolean) {
             appInForegroundFlow.value = inForeground

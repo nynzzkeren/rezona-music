@@ -633,13 +633,27 @@ private fun StudioPrismStageSection(
     var swipeX by remember { mutableFloatStateOf(0f) }
     val animX by animateFloatAsState(swipeX, spring(dampingRatio = 0.78f, stiffness = 340f), label = "cover_x")
 
-    val infiniteSpin = rememberInfiniteTransition(label = "vinyl_spin")
-    val spinDeg by infiniteSpin.animateFloat(
-        initialValue = 0f,
-        targetValue = 360f,
-        animationSpec = infiniteRepeatable(tween(9000, easing = androidx.compose.animation.core.LinearEasing), AnimRepeatMode.Restart),
-        label = "deg"
+    // Butter-smooth 120fps continuous frame-clock vinyl rotation (accelerates on play, glides to stop on pause, never snaps to 0!)
+    val vinylAngleDeg = remember { mutableFloatStateOf(0f) }
+    val targetSpeedDegPerSec = if (isPlaying) 28f else 0f
+    val smoothSpeedDegPerSec by animateFloatAsState(
+        targetValue = targetSpeedDegPerSec,
+        animationSpec = tween(durationMillis = 650, easing = FastOutSlowInEasing),
+        label = "vinyl_angular_velocity"
     )
+    LaunchedEffect(isPlaying, smoothSpeedDegPerSec > 0.05f) {
+        if (!isPlaying && smoothSpeedDegPerSec <= 0.05f) return@LaunchedEffect
+        var lastNanos = 0L
+        while (isPlaying || smoothSpeedDegPerSec > 0.05f) {
+            androidx.compose.runtime.withFrameNanos { nowNanos ->
+                if (lastNanos != 0L) {
+                    val dtSec = ((nowNanos - lastNanos) / 1_000_000_000f).coerceIn(0f, 0.06f)
+                    vinylAngleDeg.floatValue = (vinylAngleDeg.floatValue + smoothSpeedDegPerSec * dtSec) % 360f
+                }
+                lastNanos = nowNanos
+            }
+        }
+    }
 
     BoxWithConstraints(
         modifier = modifier
@@ -701,82 +715,101 @@ private fun StudioPrismStageSection(
             }
         } else {
             val stageMaxWidth = maxWidth
-            val sleeveSize = (stageMaxWidth * 0.68f).coerceAtMost((maxHeight - 52.dp).coerceAtLeast(180.dp))
+            val platterSize = (stageMaxWidth * 0.84f).coerceAtMost((maxHeight - 54.dp).coerceAtLeast(210.dp))
             Column(
                 modifier = Modifier.offset { IntOffset(animX.roundToInt(), 0) },
                 horizontalAlignment = Alignment.CenterHorizontally,
                 verticalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                // Floating Refractive Glass Pedestal + Peeking Spinning Vinyl Disc
+                // Giant Center-Stage Liquid Glass Turntable Ring + Smooth 120fps Spinning Vinyl Record
                 Box(
-                    modifier = Modifier
-                        .width((sleeveSize + 36.dp).coerceAtMost(stageMaxWidth - 28.dp))
-                        .height(sleeveSize + 14.dp),
-                    contentAlignment = Alignment.CenterStart
+                    modifier = Modifier.size(platterSize),
+                    contentAlignment = Alignment.Center
                 ) {
-                    // Peeking spinning vinyl disc on the right
-                    val discSize = (sleeveSize - 18.dp).coerceAtLeast(140.dp)
+                    // Outer frosted Liquid Glass turntable platter halo
                     Box(
                         modifier = Modifier
-                            .size(discSize)
-                            .align(Alignment.CenterEnd)
-                            .graphicsLayer {
-                                rotationZ = if (isPlaying) spinDeg else 0f
-                            }
+                            .fillMaxSize()
                             .clip(CircleShape)
                             .background(
                                 Brush.radialGradient(
                                     listOf(
-                                        Color(0xFF323744),
-                                        Color(0xFF0E1016),
-                                        Color(0xFF222631),
-                                        Color(0xFF07080B)
+                                        lerp(palette.glassTint, PureWhite, 0.16f).copy(alpha = 0.28f),
+                                        palette.glassTint.copy(alpha = 0.12f),
+                                        Color.Transparent
                                     )
                                 )
                             )
-                            .border(1.dp, Color(0x42FFFFFF), CircleShape),
+                            .border(1.2.dp, SpecularDockBorder, CircleShape)
+                    )
+
+                    // Spinning Vinyl Record Disc (92% of platter)
+                    val vinylDiscSize = platterSize * 0.92f
+                    Box(
+                        modifier = Modifier
+                            .size(vinylDiscSize)
+                            .graphicsLayer {
+                                rotationZ = vinylAngleDeg.floatValue
+                            }
+                            .clip(CircleShape)
+                            .background(
+                                Brush.sweepGradient(
+                                    listOf(
+                                        Color(0xFF0A0C10),
+                                        Color(0xFF282D38),
+                                        Color(0xFF0B0D12),
+                                        Color(0xFF1F232C),
+                                        Color(0xFF0A0C10),
+                                        Color(0xFF2B303C),
+                                        Color(0xFF0B0D12),
+                                        Color(0xFF0A0C10)
+                                    )
+                                )
+                            )
+                            .border(1.5.dp, Color(0x48FFFFFF), CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
+                        // Concentric vinyl micro-groove rings
+                        Box(
+                            modifier = Modifier
+                                .size(vinylDiscSize * 0.86f)
+                                .clip(CircleShape)
+                                .border(0.7.dp, Color(0x1EFFFFFF), CircleShape)
+                        )
+                        Box(
+                            modifier = Modifier
+                                .size(vinylDiscSize * 0.74f)
+                                .clip(CircleShape)
+                                .border(0.7.dp, Color(0x24FFFFFF), CircleShape)
+                        )
+
+                        // Large spinning Album Art Center Label (62% of vinyl disc)
+                        val labelSize = vinylDiscSize * 0.62f
                         RezonaAsyncCoverArt(
                             coverArtUrl = track.coverArtUrl,
                             fallbackIndex = track.index,
                             shape = CircleShape,
                             modifier = Modifier
-                                .size(discSize * 0.34f)
-                                .border(1.dp, PureWhite.copy(alpha = 0.5f), CircleShape)
+                                .size(labelSize)
+                                .border(1.5.dp, SpecularCardBorder, CircleShape)
                         )
+
+                        // Inner vinyl spindle collar + center hole
                         Box(
                             modifier = Modifier
-                                .size(10.dp)
+                                .size(24.dp)
                                 .clip(CircleShape)
-                                .background(Color(0xFF07090D))
-                        )
-                    }
-
-                    // Double-rimmed Liquid Glass Sleeve Frame
-                    Box(
-                        modifier = Modifier
-                            .size(sleeveSize + 14.dp)
-                            .clip(RoundedCornerShape(30.dp))
-                            .background(
-                                Brush.verticalGradient(
-                                    listOf(
-                                        lerp(palette.glassTint, PureWhite, 0.16f).copy(alpha = 0.34f),
-                                        palette.glassTint.copy(alpha = 0.18f)
-                                    )
-                                )
+                                .background(Color(0xCC0B0D12))
+                                .border(1.dp, PureWhite.copy(alpha = 0.55f), CircleShape),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(8.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xFF050608))
                             )
-                            .border(1.dp, SpecularDockBorder, RoundedCornerShape(30.dp))
-                            .padding(7.dp)
-                    ) {
-                        RezonaAsyncCoverArt(
-                            coverArtUrl = track.coverArtUrl,
-                            fallbackIndex = track.index,
-                            shape = RoundedCornerShape(24.dp),
-                            modifier = Modifier
-                                .fillMaxSize()
-                                .border(0.75.dp, SpecularCardBorder, RoundedCornerShape(24.dp))
-                        )
+                        }
                     }
                 }
 
