@@ -49,6 +49,7 @@ class RezonaPreferences(private val context: Context) {
         val KEY_DOCK_FOLD_ON_SCROLL = booleanPreferencesKey("ui_dock_fold_on_scroll")
         val KEY_DYNAMIC_ISLAND_ENABLED = booleanPreferencesKey("ui_dynamic_island_enabled")
         val KEY_DYNAMIC_ISLAND_CUTOUT_MODE = stringPreferencesKey("ui_dynamic_island_cutout_mode")
+        val KEY_IOS_SIDE_PLAYER_ENABLED = booleanPreferencesKey("ui_ios_side_player_enabled")
 
         // Smart Playback, Bluetooth Auto-Play, Background Keep-Alive & Music Alarm
         val KEY_AUTO_PLAY_BLUETOOTH = booleanPreferencesKey("playback_auto_play_bluetooth")
@@ -315,6 +316,10 @@ class RezonaPreferences(private val context: Context) {
         prefs[KEY_DYNAMIC_ISLAND_ENABLED] ?: false
     }
 
+    val iosSidePlayerEnabledFlow: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[KEY_IOS_SIDE_PLAYER_ENABLED] ?: false
+    }
+
     // "Auto" | "Overlap" | "Below"
     val dynamicIslandCutoutModeFlow: Flow<String> = context.dataStore.data.map { prefs ->
         prefs[KEY_DYNAMIC_ISLAND_CUTOUT_MODE] ?: "Auto"
@@ -322,6 +327,10 @@ class RezonaPreferences(private val context: Context) {
 
     suspend fun setDynamicIslandEnabled(enabled: Boolean) {
         context.dataStore.edit { prefs -> prefs[KEY_DYNAMIC_ISLAND_ENABLED] = enabled }
+    }
+
+    suspend fun setIosSidePlayerEnabled(enabled: Boolean) {
+        context.dataStore.edit { prefs -> prefs[KEY_IOS_SIDE_PLAYER_ENABLED] = enabled }
     }
 
     suspend fun setDynamicIslandCutoutMode(mode: String) {

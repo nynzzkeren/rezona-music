@@ -106,8 +106,10 @@ fun RezonaApp() {
     val glassBlurRadiusDp by preferences.glassBlurRadiusDpFlow.collectAsState(initial = 22)
     val autoPlayBluetooth by preferences.autoPlayBluetoothFlow.collectAsState(initial = true)
     val dynamicIslandEnabled by preferences.dynamicIslandEnabledFlow.collectAsState(initial = false)
+    val iosSidePlayerEnabled by preferences.iosSidePlayerEnabledFlow.collectAsState(initial = false)
     val islandCutoutMode by preferences.dynamicIslandCutoutModeFlow.collectAsState(initial = "Auto")
     var inAppIslandExpanded by remember { mutableStateOf(false) }
+    var inAppIosSideOpen by remember { mutableStateOf(false) }
     val authGateSeen by preferences.authGateSeenFlow.collectAsState(initial = null as Boolean?)
     val authSession by authManager.session.collectAsState()
     val syncStatus by syncManager.status.collectAsState()
@@ -375,6 +377,25 @@ fun RezonaApp() {
                 isVisible = isExpandedPlayerVisible,
                 onDismiss = { isExpandedPlayerVisible = false }
             )
+
+            // 3c. Universal In-App iOS Control Center Side-Edge Music Handle & Pull-Out Card
+            if (iosSidePlayerEnabled && currentTrack != null) {
+                if (!inAppIosSideOpen) {
+                    Box(
+                        modifier = Modifier.fillMaxSize(),
+                        contentAlignment = Alignment.CenterEnd
+                    ) {
+                        com.nayama.music.overlay.RezonaIosSideEdgeHandle(
+                            onOpenCard = { inAppIosSideOpen = true }
+                        )
+                    }
+                }
+                com.nayama.music.overlay.RezonaIosMusicCardOverlay(
+                    controller = playerController,
+                    isOpen = inAppIosSideOpen,
+                    onClose = { inAppIosSideOpen = false }
+                )
+            }
 
             // 4. Legacy Sound Lab (behind feature flag in You tab)
             if (isSoundLabVisible) {

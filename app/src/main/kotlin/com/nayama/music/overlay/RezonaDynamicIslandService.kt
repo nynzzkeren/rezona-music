@@ -175,6 +175,10 @@ class RezonaDynamicIslandService : Service(), LifecycleOwner, SavedStateRegistry
     private var windowParams: WindowManager.LayoutParams? = null
     private val isExpandedFlow = MutableStateFlow(false)
 
+    private var sideComposeView: ComposeView? = null
+    private var sideWindowParams: WindowManager.LayoutParams? = null
+    private val isSideCardOpenFlow = MutableStateFlow(false)
+
     override fun onCreate() {
         super.onCreate()
         overlayRunningFlow.value = true
@@ -259,11 +263,11 @@ class RezonaDynamicIslandService : Service(), LifecycleOwner, SavedStateRegistry
                 appInForegroundFlow,
                 previewUntilMsFlow,
                 snapshotFlow { controller.currentTrack.value },
-                preferences.dynamicIslandCutoutModeFlow,
-                isExpandedFlow
-            ) { inForeground, previewUntilMs, track, cutoutMode, expanded ->
+                preferences.dynamicIslandEnabledFlow,
+                combine(preferences.dynamicIslandCutoutModeFlow, isExpandedFlow) { c, e -> c to e }
+            ) { inForeground, previewUntilMs, track, islandEnabled, (cutoutMode, expanded) ->
                 val isPreviewing = System.currentTimeMillis() < previewUntilMs
-                val visible = track != null && (!inForeground || isPreviewing)
+                val visible = islandEnabled && track != null && (!inForeground || isPreviewing)
                 Triple(visible, cutoutMode, expanded)
             }.collectLatest { (visible, cutoutMode, expanded) ->
                 val v = composeView ?: return@collectLatest
@@ -296,6 +300,93 @@ class RezonaDynamicIslandService : Service(), LifecycleOwner, SavedStateRegistry
                 }
             }
         }
+
+        // 2. iOS Control Center Side-Edge Pull-Out Music Overlay Window
+        val sideParams = WindowManager.LayoutParams(
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            WindowManager.LayoutParams.WRAP_CONTENT,
+            overlayType,
+            WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE or
+                WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN,
+            PixelFormat.TRANSLUCENT
+        ).apply {
+            gravity = Gravity.CENTER_VERTICAL or Gravity.END
+            x = 0
+            y = 0
+        }
+        sideWindowParams = sideParams
+
+        val sideView = ComposeView(this).apply {
+            setViewTreeLifecycleOwner(this@RezonaDynamicIslandService)
+            setViewTreeSavedStateRegistryOwner(this@RezonaDynamicIslandService)
+            setViewCompositionStrategy(ViewCompositionStrategy.DisposeOnViewTreeLifecycleDestroyed)
+            setContent {
+                val sideOpen by isSideCardOpenFlow.collectAsState()
+                if (!sideOpen) {
+                    RezonaIosSideEdgeHandle(
+                        onOpenCard = { isSideCardOpenFlow.value = true }
+                    )
+                } else {
+                    RezonaIosMusicCardOverlay(
+                        controller = controller,
+                        isOpen = true,
+                        onClose = { isSideCardOpenFlow.value = false }
+                    )
+                }
+            }
+        }
+        sideComposeView = sideView
+        runCatching { wm.addView(sideView, sideParams) }
+
+        serviceScope.launch {
+            combine(
+                appInForegroundFlow,
+                snapshotFlow { controller.currentTrack.value },
+                preferences.iosSidePlayerEnabledFlow,
+                isSideCardOpenFlow
+            ) { inForeground, track, iosEnabled, sideOpen ->
+                val visible = iosEnabled && track != null && !inForeground
+                visible to sideOpen
+            }.collectLatest { (visible, sideOpen) ->
+                val sv = sideComposeView ?: return@collectLatest
+                val sp = sideWindowParams ?: return@collectLatest
+                val targetVis = if (visible) View.VISIBLE else View.GONE
+                val desiredW = if (visible && sideOpen) {
+                    WindowManager.LayoutParams.MATCH_PARENT
+                } else {
+                    WindowManager.LayoutParams.WRAP_CONTENT
+                }
+                val desiredH = if (visible && sideOpen) {
+                    WindowManager.LayoutParams.MATCH_PARENT
+                } else {
+                    WindowManager.LayoutParams.WRAP_CONTENT
+                }
+                val desiredFlags = if (visible) {
+                    sp.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+                } else {
+                    sp.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                }
+
+                var changed = false
+                if (sp.width != desiredW || sp.height != desiredH) {
+                    sp.width = desiredW
+                    sp.height = desiredH
+                    changed = true
+                }
+                if (sp.flags != desiredFlags) {
+                    sp.flags = desiredFlags
+                    changed = true
+                }
+                if (sv.visibility != targetVis) {
+                    sv.visibility = targetVis
+                    if (!visible) isSideCardOpenFlow.value = false
+                    changed = true
+                }
+                if (changed) {
+                    runCatching { wm.updateViewLayout(sv, sp) }
+                }
+            }
+        }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -321,6 +412,10 @@ class RezonaDynamicIslandService : Service(), LifecycleOwner, SavedStateRegistry
             runCatching { windowManager?.removeView(v) }
         }
         composeView = null
+        sideComposeView?.let { sv ->
+            runCatching { windowManager?.removeView(sv) }
+        }
+        sideComposeView = null
         lifecycleRegistry.currentState = Lifecycle.State.DESTROYED
         super.onDestroy()
     }

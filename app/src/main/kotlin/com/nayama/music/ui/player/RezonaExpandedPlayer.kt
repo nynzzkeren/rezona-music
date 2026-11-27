@@ -165,6 +165,8 @@ fun RezonaExpandedPlayer(
 
     val scrubberStyle by preferences.scrubberStyleFlow.collectAsState(initial = "Line")
     val vividAmbient by preferences.ambientVividPlayerFlow.collectAsState(initial = true)
+    val dynamicIslandEnabled by preferences.dynamicIslandEnabledFlow.collectAsState(initial = false)
+    val iosSidePlayerEnabled by preferences.iosSidePlayerEnabledFlow.collectAsState(initial = false)
 
     val track = controller.currentTrack.value ?: return
     val isPlaying = controller.isPlaying.value
@@ -369,6 +371,55 @@ fun RezonaExpandedPlayer(
                         isSoundSheetOpen = showSoundSheet,
                         sleepSecRemaining = sleepSecRemaining,
                         sleepEndOfTrack = sleepEndOfTrack,
+                        isDynamicIslandEnabled = dynamicIslandEnabled,
+                        isIosSidePlayerEnabled = iosSidePlayerEnabled,
+                        onToggleDynamicIsland = {
+                            val next = !dynamicIslandEnabled
+                            scope.launch {
+                                preferences.setDynamicIslandEnabled(next)
+                                val granted = com.nayama.music.overlay.OverlayPermissionHelper.canDrawOverlays(context)
+                                if (next) {
+                                    if (granted) {
+                                        com.nayama.music.overlay.RezonaDynamicIslandService.start(context)
+                                        Toast.makeText(context, "Dynamic Island ON", Toast.LENGTH_SHORT).show()
+                                    } else {
+                                        Toast.makeText(
+                                            context,
+                                            "Dynamic Island ON · Enable 'Display over other apps' to show outside Rezona",
+                                            Toast.LENGTH_LONG
+                                        ).show()
+                                        com.nayama.music.overlay.OverlayPermissionHelper.openOverlayPermissionSettings(context)
+                                    }
+                                } else {
+                                    if (!iosSidePlayerEnabled) {
+                                        com.nayama.music.overlay.RezonaDynamicIslandService.stop(context)
+                                    }
+                                    Toast.makeText(context, "Dynamic Island OFF", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        },
+                        onToggleIosSidePlayer = {
+                            val next = !iosSidePlayerEnabled
+                            scope.launch {
+                                preferences.setIosSidePlayerEnabled(next)
+                                val granted = com.nayama.music.overlay.OverlayPermissionHelper.canDrawOverlays(context)
+                                if (next) {
+                                    if (granted) {
+                                        com.nayama.music.overlay.RezonaDynamicIslandService.start(context)
+                                    }
+                                    Toast.makeText(
+                                        context,
+                                        "iOS Background Side Player ON · Tap ♫ on right screen edge",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                } else {
+                                    if (!dynamicIslandEnabled) {
+                                        com.nayama.music.overlay.RezonaDynamicIslandService.stop(context)
+                                    }
+                                    Toast.makeText(context, "iOS Background Side Player OFF", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        },
                         onOpenQueue = { showQueueSheet = true },
                         onToggleLike = { controller.toggleLike() },
                         onSeekFraction = { controller.seekToFraction(it) },
@@ -715,101 +766,225 @@ private fun StudioPrismStageSection(
             }
         } else {
             val stageMaxWidth = maxWidth
-            val platterSize = (stageMaxWidth * 0.84f).coerceAtMost((maxHeight - 54.dp).coerceAtLeast(210.dp))
+            val deckSize = (stageMaxWidth * 0.85f).coerceAtMost((maxHeight - 50.dp).coerceAtLeast(218.dp))
+            val tonearmAngleDeg by animateFloatAsState(
+                targetValue = if (isPlaying) 24f else 4f,
+                animationSpec = spring(dampingRatio = 0.76f, stiffness = 220f),
+                label = "turntable_tonearm_angle"
+            )
             Column(
                 modifier = Modifier.offset { IntOffset(animX.roundToInt(), 0) },
                 horizontalAlignment = Alignment.CenterHorizontally,
-                verticalArrangement = Arrangement.spacedBy(12.dp)
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // Giant Center-Stage Liquid Glass Turntable Ring + Smooth 120fps Spinning Vinyl Record
+                // Sculpted Liquid Glass Turntable Deck Chassis ("Tempat Piringan") + 120fps Spinning Vinyl Record
+                val deckShape = RoundedCornerShape(36.dp)
                 Box(
-                    modifier = Modifier.size(platterSize),
+                    modifier = Modifier
+                        .size(deckSize)
+                        .clip(deckShape)
+                        .background(
+                            Brush.linearGradient(
+                                colors = listOf(
+                                    lerp(palette.glassTint, PureWhite, 0.20f).copy(alpha = 0.42f),
+                                    lerp(palette.ambientBase, Color(0xFF141821), 0.55f).copy(alpha = 0.78f),
+                                    Color(0xDD080A0F)
+                                )
+                            )
+                        )
+                        .border(1.4.dp, SpecularDockBorder, deckShape)
+                        .padding(14.dp),
                     contentAlignment = Alignment.Center
                 ) {
-                    // Outer frosted Liquid Glass turntable platter halo
+                    // 4 Brushed-Metal Corner Turntable Mount Screws
+                    listOf(
+                        Alignment.TopStart,
+                        Alignment.BottomStart,
+                        Alignment.BottomEnd
+                    ).forEach { cornerAlign ->
+                        Box(
+                            modifier = Modifier
+                                .align(cornerAlign)
+                                .size(11.dp)
+                                .clip(CircleShape)
+                                .background(Color(0x44FFFFFF))
+                                .border(0.8.dp, Color(0x66FFFFFF), CircleShape)
+                        )
+                    }
+
+                    // Bottom-left Hi-Fi Strobe / RPM LED Indicator on Turntable Deck
+                    Row(
+                        modifier = Modifier
+                            .align(Alignment.BottomStart)
+                            .padding(start = 16.dp, bottom = 1.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(if (isPlaying) Color(0xFF66FFAA) else Color(0x66FFFFFF))
+                        )
+                        Text(
+                            text = "33⅓ RPM",
+                            color = Color.White.copy(alpha = 0.56f),
+                            fontSize = 9.sp,
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    // Recessed Circular Platter Well (Cekungan Tempat Piringan)
+                    val platterWellSize = deckSize * 0.87f
                     Box(
                         modifier = Modifier
-                            .fillMaxSize()
+                            .size(platterWellSize)
                             .clip(CircleShape)
                             .background(
                                 Brush.radialGradient(
                                     listOf(
-                                        lerp(palette.glassTint, PureWhite, 0.16f).copy(alpha = 0.28f),
-                                        palette.glassTint.copy(alpha = 0.12f),
-                                        Color.Transparent
+                                        Color(0xFF050608),
+                                        Color(0xFF0E1117),
+                                        lerp(palette.glassTint, PureWhite, 0.14f).copy(alpha = 0.34f)
                                     )
                                 )
                             )
-                            .border(1.2.dp, SpecularDockBorder, CircleShape)
-                    )
-
-                    // Spinning Vinyl Record Disc (92% of platter)
-                    val vinylDiscSize = platterSize * 0.92f
-                    Box(
-                        modifier = Modifier
-                            .size(vinylDiscSize)
-                            .graphicsLayer {
-                                rotationZ = vinylAngleDeg.floatValue
-                            }
-                            .clip(CircleShape)
-                            .background(
-                                Brush.sweepGradient(
-                                    listOf(
-                                        Color(0xFF0A0C10),
-                                        Color(0xFF282D38),
-                                        Color(0xFF0B0D12),
-                                        Color(0xFF1F232C),
-                                        Color(0xFF0A0C10),
-                                        Color(0xFF2B303C),
-                                        Color(0xFF0B0D12),
-                                        Color(0xFF0A0C10)
-                                    )
-                                )
-                            )
-                            .border(1.5.dp, Color(0x48FFFFFF), CircleShape),
+                            .border(1.5.dp, Color.White.copy(alpha = 0.28f), CircleShape),
                         contentAlignment = Alignment.Center
                     ) {
-                        // Concentric vinyl micro-groove rings
+                        // Inner metallic strobe rim inside the platter well
                         Box(
                             modifier = Modifier
-                                .size(vinylDiscSize * 0.86f)
+                                .size(platterWellSize * 0.95f)
                                 .clip(CircleShape)
-                                .border(0.7.dp, Color(0x1EFFFFFF), CircleShape)
-                        )
-                        Box(
-                            modifier = Modifier
-                                .size(vinylDiscSize * 0.74f)
-                                .clip(CircleShape)
-                                .border(0.7.dp, Color(0x24FFFFFF), CircleShape)
+                                .border(0.8.dp, Color.White.copy(alpha = 0.16f), CircleShape)
                         )
 
-                        // Large spinning Album Art Center Label (62% of vinyl disc)
-                        val labelSize = vinylDiscSize * 0.62f
-                        RezonaAsyncCoverArt(
-                            coverArtUrl = track.coverArtUrl,
-                            fallbackIndex = track.index,
-                            shape = CircleShape,
-                            modifier = Modifier
-                                .size(labelSize)
-                                .border(1.5.dp, SpecularCardBorder, CircleShape)
-                        )
-
-                        // Inner vinyl spindle collar + center hole
+                        // Spinning Vinyl Record Disc (90% of platter well)
+                        val vinylDiscSize = platterWellSize * 0.90f
                         Box(
                             modifier = Modifier
-                                .size(24.dp)
+                                .size(vinylDiscSize)
+                                .graphicsLayer {
+                                    rotationZ = vinylAngleDeg.floatValue
+                                }
                                 .clip(CircleShape)
-                                .background(Color(0xCC0B0D12))
-                                .border(1.dp, PureWhite.copy(alpha = 0.55f), CircleShape),
+                                .background(
+                                    Brush.sweepGradient(
+                                        listOf(
+                                            Color(0xFF0A0C10),
+                                            Color(0xFF282D38),
+                                            Color(0xFF0B0D12),
+                                            Color(0xFF1F232C),
+                                            Color(0xFF0A0C10),
+                                            Color(0xFF2B303C),
+                                            Color(0xFF0B0D12),
+                                            Color(0xFF0A0C10)
+                                        )
+                                    )
+                                )
+                                .border(1.5.dp, Color(0x48FFFFFF), CircleShape),
                             contentAlignment = Alignment.Center
                         ) {
+                            // Concentric vinyl micro-groove rings
                             Box(
                                 modifier = Modifier
-                                    .size(8.dp)
+                                    .size(vinylDiscSize * 0.86f)
                                     .clip(CircleShape)
-                                    .background(Color(0xFF050608))
+                                    .border(0.7.dp, Color(0x1EFFFFFF), CircleShape)
                             )
+                            Box(
+                                modifier = Modifier
+                                    .size(vinylDiscSize * 0.74f)
+                                    .clip(CircleShape)
+                                    .border(0.7.dp, Color(0x24FFFFFF), CircleShape)
+                            )
+
+                            // Large spinning Album Art Center Label (62% of vinyl disc)
+                            val labelSize = vinylDiscSize * 0.62f
+                            RezonaAsyncCoverArt(
+                                coverArtUrl = track.coverArtUrl,
+                                fallbackIndex = track.index,
+                                shape = CircleShape,
+                                modifier = Modifier
+                                    .size(labelSize)
+                                    .border(1.5.dp, SpecularCardBorder, CircleShape)
+                            )
+
+                            // Inner vinyl spindle collar + center hole
+                            Box(
+                                modifier = Modifier
+                                    .size(22.dp)
+                                    .clip(CircleShape)
+                                    .background(Color(0xCC0B0D12))
+                                    .border(1.dp, PureWhite.copy(alpha = 0.55f), CircleShape),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(7.dp)
+                                        .clip(CircleShape)
+                                        .background(Color(0xFF050608))
+                                )
+                            }
                         }
+                    }
+
+                    // Top-Right Pivoting Hi-Fi Turntable Tonearm (Jarum / Lengan Pemutar Piringan)
+                    Canvas(
+                        modifier = Modifier
+                            .align(Alignment.TopEnd)
+                            .size(deckSize * 0.44f)
+                            .graphicsLayer {
+                                rotationZ = tonearmAngleDeg
+                                transformOrigin = androidx.compose.ui.graphics.TransformOrigin(0.82f, 0.18f)
+                            }
+                    ) {
+                        val pivotX = size.width * 0.82f
+                        val pivotY = size.height * 0.18f
+                        val elbowX = size.width * 0.76f
+                        val elbowY = size.height * 0.74f
+                        val headX = size.width * 0.56f
+                        val headY = size.height * 0.90f
+
+                        // Tonearm gimbal base ring
+                        drawCircle(
+                            color = Color(0x55000000),
+                            radius = 18.dp.toPx(),
+                            center = androidx.compose.ui.geometry.Offset(pivotX, pivotY)
+                        )
+                        drawCircle(
+                            color = Color(0xFFE4E8F0),
+                            radius = 13.dp.toPx(),
+                            center = androidx.compose.ui.geometry.Offset(pivotX, pivotY)
+                        )
+                        drawCircle(
+                            color = Color(0xFF1A1E26),
+                            radius = 6.dp.toPx(),
+                            center = androidx.compose.ui.geometry.Offset(pivotX, pivotY)
+                        )
+
+                        // Brushed silver tonearm tube
+                        drawLine(
+                            color = Color(0xFFF0F4FA),
+                            start = androidx.compose.ui.geometry.Offset(pivotX, pivotY),
+                            end = androidx.compose.ui.geometry.Offset(elbowX, elbowY),
+                            strokeWidth = 3.5.dp.toPx(),
+                            cap = androidx.compose.ui.graphics.StrokeCap.Round
+                        )
+                        drawLine(
+                            color = Color(0xFFF0F4FA),
+                            start = androidx.compose.ui.geometry.Offset(elbowX, elbowY),
+                            end = androidx.compose.ui.geometry.Offset(headX, headY),
+                            strokeWidth = 3.5.dp.toPx(),
+                            cap = androidx.compose.ui.graphics.StrokeCap.Round
+                        )
+                        // Stylus cartridge head
+                        drawCircle(
+                            color = Color.White,
+                            radius = 5.5.dp.toPx(),
+                            center = androidx.compose.ui.geometry.Offset(headX, headY)
+                        )
                     }
                 }
 
@@ -891,6 +1066,10 @@ private fun StudioConsoleControlDeck(
     isSoundSheetOpen: Boolean,
     sleepSecRemaining: Int?,
     sleepEndOfTrack: Boolean,
+    isDynamicIslandEnabled: Boolean,
+    isIosSidePlayerEnabled: Boolean,
+    onToggleDynamicIsland: () -> Unit,
+    onToggleIosSidePlayer: () -> Unit,
     onOpenQueue: () -> Unit,
     onToggleLike: () -> Unit,
     onSeekFraction: (Float) -> Unit,
@@ -1162,6 +1341,89 @@ private fun StudioConsoleControlDeck(
                     onClick = onOpenShare,
                     modifier = Modifier.width(44.dp).height(36.dp)
                 )
+            }
+
+            // 5. Direct Feature Toggle Row: Dynamic Island & iOS Background Side Player (No need to open Settings!)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(34.dp)
+                        .clip(CircleShape)
+                        .background(
+                            if (isDynamicIslandEnabled) Color.White.copy(alpha = 0.24f)
+                            else Color.White.copy(alpha = 0.10f)
+                        )
+                        .border(
+                            width = 0.9.dp,
+                            color = if (isDynamicIslandEnabled) PureWhite.copy(alpha = 0.65f) else Color.White.copy(alpha = 0.22f),
+                            shape = CircleShape
+                        )
+                        .clickable(onClick = onToggleDynamicIsland)
+                        .padding(horizontal = 10.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(if (isDynamicIslandEnabled) Color(0xFF66FFAA) else SoftSilver)
+                        )
+                        Text(
+                            text = if (isDynamicIslandEnabled) "Dynamic Island: ON" else "Dynamic Island",
+                            style = Typography.labelSmall.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold),
+                            color = PureWhite,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+
+                Box(
+                    modifier = Modifier
+                        .weight(1f)
+                        .height(34.dp)
+                        .clip(CircleShape)
+                        .background(
+                            if (isIosSidePlayerEnabled) Color.White.copy(alpha = 0.24f)
+                            else Color.White.copy(alpha = 0.10f)
+                        )
+                        .border(
+                            width = 0.9.dp,
+                            color = if (isIosSidePlayerEnabled) PureWhite.copy(alpha = 0.65f) else Color.White.copy(alpha = 0.22f),
+                            shape = CircleShape
+                        )
+                        .clickable(onClick = onToggleIosSidePlayer)
+                        .padding(horizontal = 10.dp),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Box(
+                            modifier = Modifier
+                                .size(6.dp)
+                                .clip(CircleShape)
+                                .background(if (isIosSidePlayerEnabled) Color(0xFF66FFAA) else SoftSilver)
+                        )
+                        Text(
+                            text = if (isIosSidePlayerEnabled) "iOS Background: ON" else "iOS Background",
+                            style = Typography.labelSmall.copy(fontSize = 11.sp, fontWeight = FontWeight.Bold),
+                            color = PureWhite,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
             }
         }
     }
