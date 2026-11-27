@@ -86,12 +86,16 @@ fun RezonaTrackMenuSheet(
     showVolumeSlider: Boolean = true,
     onDismiss: () -> Unit,
     onOpenEqualizer: () -> Unit = {},
-    onOpenAmbientMode: () -> Unit = {}
+    onOpenAmbientMode: () -> Unit = {},
+    onOpen3dSongPoster: () -> Unit = {}
 ) {
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val libraryRepo = remember { RezonaLibraryRepository.getInstance(context) }
     val downloadMgr = remember { OfflineDownloadManager.getInstance(context) }
+    val preferences = remember { com.nayama.music.data.preferences.RezonaPreferences(context) }
+    val dynamicIslandEnabled by preferences.dynamicIslandEnabledFlow.collectAsState(initial = false)
+    val iosSidePlayerEnabled by preferences.iosSidePlayerEnabledFlow.collectAsState(initial = false)
 
     val isLiked by libraryRepo.isLiked(track.id).collectAsState(initial = false)
     val isPinned by libraryRepo.isPinnedSpeedDial(track.id).collectAsState(initial = false)
@@ -236,16 +240,70 @@ fun RezonaTrackMenuSheet(
             ) {
                 MenuGlassTile(
                     iconRes = R.drawable.ic_share,
-                    label = "Share song card",
+                    label = "3D Song Poster",
                     onClick = {
+                        onDismiss()
+                        onOpen3dSongPoster()
+                    },
+                    modifier = Modifier.weight(1f)
+                )
+                MenuGlassTile(
+                    iconRes = R.drawable.ic_sound_waves,
+                    label = if (dynamicIslandEnabled) "Island: ON" else "Dynamic Island",
+                    onClick = {
+                        val next = !dynamicIslandEnabled
                         scope.launch {
-                            RezonaSongCardRenderer.shareSongCard(context, track)
+                            preferences.setDynamicIslandEnabled(next)
+                            val granted = com.nayama.music.overlay.OverlayPermissionHelper.canDrawOverlays(context)
+                            if (next) {
+                                if (granted) {
+                                    com.nayama.music.overlay.RezonaDynamicIslandService.start(context)
+                                    Toast.makeText(context, "Dynamic Island ON", Toast.LENGTH_SHORT).show()
+                                } else {
+                                    Toast.makeText(
+                                        context,
+                                        "Dynamic Island ON · Enable 'Display over other apps' to show outside Rezona",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                    com.nayama.music.overlay.OverlayPermissionHelper.openOverlayPermissionSettings(context)
+                                }
+                            } else {
+                                if (!iosSidePlayerEnabled) {
+                                    com.nayama.music.overlay.RezonaDynamicIslandService.stop(context)
+                                }
+                                Toast.makeText(context, "Dynamic Island OFF", Toast.LENGTH_SHORT).show()
+                            }
                         }
                     },
                     modifier = Modifier.weight(1f)
                 )
-                Spacer(modifier = Modifier.weight(1f))
-                Spacer(modifier = Modifier.weight(1f))
+                MenuGlassTile(
+                    iconRes = R.drawable.ic_music_note,
+                    label = if (iosSidePlayerEnabled) "iOS Side: ON" else "iOS Background",
+                    onClick = {
+                        val next = !iosSidePlayerEnabled
+                        scope.launch {
+                            preferences.setIosSidePlayerEnabled(next)
+                            val granted = com.nayama.music.overlay.OverlayPermissionHelper.canDrawOverlays(context)
+                            if (next) {
+                                if (granted) {
+                                    com.nayama.music.overlay.RezonaDynamicIslandService.start(context)
+                                }
+                                Toast.makeText(
+                                    context,
+                                    "iOS Background Side Player ON · Tap ♫ on right screen edge",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            } else {
+                                if (!dynamicIslandEnabled) {
+                                    com.nayama.music.overlay.RezonaDynamicIslandService.stop(context)
+                                }
+                                Toast.makeText(context, "iOS Background Side Player OFF", Toast.LENGTH_SHORT).show()
+                            }
+                        }
+                    },
+                    modifier = Modifier.weight(1f)
+                )
             }
 
             Spacer(modifier = Modifier.height(16.dp))

@@ -1,19 +1,19 @@
 ﻿{
     "versionCode":  4,
     "versionName":  "1.0.4",
-    "announcementId":  "rezona-v1.0.4-202611271533",
-    "title":  "Rezona Update — iOS Background Player \u0026 Turntable Deck",
+    "announcementId":  "rezona-v1.0.4-202611271844",
+    "title":  "Rezona Update — 3D Floating Song Poster Studio \u0026 Ultra-Light 120fps",
     "apkUrl":  "https://rezona-music-web.vercel.app",
     "added":  [
-                  "iOS Control Center Background Side Player (tap/swipe ♫ on right screen edge)",
-                  "Direct Dynamic Island \u0026 iOS Background toggle buttons inside Now Playing"
+                  "3D Floating Song Poster Studio (6 3D layouts, upload your own photo \u0026 search any song for floating cards)",
+                  "Dynamic Island, iOS Background \u0026 3D Song Poster moved cleanly into Now Playing 3-dot menu"
               ],
     "fixed":  [
-                  "Dynamic Island click freeze/stuck bug fixed"
+                  "Eliminated scroll \u0026 background lag (zero per-card GPU blur shader, zero 500ms widget polling)"
               ],
     "improved":  [
-                     "Hi-Fi Liquid Glass Turntable Deck housing + animated tonearm for spinning vinyl",
-                     "3-line Widget Lyrics matching in-app Lyrics Style \u0026 Font"
+                     "Now Playing restored to sleek Large Crystal Cover Art Banner",
+                     "Upgraded Split-Deck Widget Lyrics \u0026 iOS Background Side Player"
                  ],
-    "changelog":  "1. Add :\n- iOS Control Center Background Side Player (tap/swipe ♫ on right screen edge)\n- Direct Dynamic Island \u0026 iOS Background toggle buttons inside Now Playing\n\n2. Fix :\n- Dynamic Island click freeze/stuck bug fixed\n\n3. Improved :\n- Hi-Fi Liquid Glass Turntable Deck housing + animated tonearm for spinning vinyl\n- 3-line Widget Lyrics matching in-app Lyrics Style \u0026 Font\n\nInstall ulang di : https://rezona-music-web.vercel.app"
+    "changelog":  "1. Add :\n- 3D Floating Song Poster Studio (6 3D layouts, upload your own photo \u0026 search any song for floating cards)\n- Dynamic Island, iOS Background \u0026 3D Song Poster moved cleanly into Now Playing 3-dot menu\n\n2. Fix :\n- Eliminated scroll \u0026 background lag (zero per-card GPU blur shader, zero 500ms widget polling)\n\n3. Improved :\n- Now Playing restored to sleek Large Crystal Cover Art Banner\n- Upgraded Split-Deck Widget Lyrics \u0026 iOS Background Side Player\n\nInstall ulang di : https://rezona-music-web.vercel.app"
 }

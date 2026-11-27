@@ -175,6 +175,7 @@ class RezonaPlayerController(
     private var lastSeenErrorSeq: Long = 0L
     private var autoAdvancingForTrackId: String? = null
     private var retriedErrorForTrackId: String? = null
+    private var lastWidgetLyricIndex: Int = -99
 
     init {
         if (context != null) {
@@ -424,7 +425,12 @@ class RezonaPlayerController(
                 } else {
                     currentPositionMs.longValue = if (dur > 0) nextPos.coerceAtMost(dur) else nextPos
                     checkAndSkipNonMusicSegment(currentPositionMs.longValue)
-                    context?.let { com.nayama.music.widget.RezonaWidgetUpdater.updateAll(it) }
+                    val lyricsList = currentLyrics.value
+                    val curLyricIdx = if (lyricsList.isEmpty()) -1 else lyricsList.indexOfLast { it.timeMs <= currentPositionMs.longValue + 180L }
+                    if (curLyricIdx != lastWidgetLyricIndex) {
+                        lastWidgetLyricIndex = curLyricIdx
+                        context?.let { com.nayama.music.widget.RezonaWidgetUpdater.updateAll(it) }
+                    }
                 }
             }
         }

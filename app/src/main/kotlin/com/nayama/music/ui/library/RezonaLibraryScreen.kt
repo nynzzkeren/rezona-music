@@ -137,6 +137,7 @@ fun RezonaLibraryScreen(
     var inlineSearchQuery by remember { mutableStateOf("") }
     var menuTrack by remember { mutableStateOf<RezonaTrack?>(null) }
     var showEqualizer by remember { mutableStateOf(false) }
+    var show3dPosterStudio by remember { mutableStateOf(false) }
 
     if (selectedPlaylistId != null) {
         RezonaPlaylistDetailScreen(
@@ -873,7 +874,16 @@ fun RezonaLibraryScreen(
             controller = controller,
             showVolumeSlider = false,
             onDismiss = { menuTrack = null },
-            onOpenEqualizer = { showEqualizer = true }
+            onOpenEqualizer = { showEqualizer = true },
+            onOpen3dSongPoster = { show3dPosterStudio = true }
+        )
+    }
+
+    if (show3dPosterStudio) {
+        com.nayama.music.ui.lyrics.RezonaFloatingSongPosterStudio(
+            initialTrack = controller.currentTrack.value ?: likedTracks.firstOrNull(),
+            queueTracks = (likedTracks + myTop50Tracks).distinctBy { it.id }.take(5),
+            onDismiss = { show3dPosterStudio = false }
         )
     }
 
@@ -965,29 +975,14 @@ private fun VinylTimeCapsuleCard(
                 .padding(12.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            Box(
+            RezonaAsyncCoverArt(
+                coverArtUrl = coverUrl,
+                fallbackIndex = fallbackIndex,
+                shape = RoundedCornerShape(16.dp),
                 modifier = Modifier
-                    .width(74.dp)
-                    .height(60.dp),
-                contentAlignment = Alignment.CenterStart
-            ) {
-                Box(
-                    modifier = Modifier
-                        .size(52.dp)
-                        .offset(x = 18.dp)
-                        .clip(CircleShape)
-                        .background(Color(0xFF141720))
-                        .border(0.8.dp, Color(0x38FFFFFF), CircleShape)
-                )
-                RezonaAsyncCoverArt(
-                    coverArtUrl = coverUrl,
-                    fallbackIndex = fallbackIndex,
-                    shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier
-                        .size(58.dp)
-                        .border(0.8.dp, SpecularCardBorder, RoundedCornerShape(14.dp))
-                )
-            }
+                    .size(58.dp)
+                    .border(1.dp, SpecularCardBorder, RoundedCornerShape(16.dp))
+            )
             Spacer(modifier = Modifier.width(12.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(

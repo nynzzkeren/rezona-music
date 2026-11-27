@@ -136,54 +136,13 @@ fun RezonaContinuousAmbientLayer(
         drawRect(
             brush = Brush.radialGradient(
                 colors = listOf(
-                    animSecondary.copy(alpha = (0.32f * boost).coerceAtMost(0.48f)),
-                    animSecondary.copy(alpha = (0.14f * boost).coerceAtMost(0.24f)),
+                    animSecondary.copy(alpha = (0.30f * boost).coerceAtMost(0.44f)),
                     Color.Transparent
                 ),
                 center = Offset(w * 0.78f, h * 0.78f),
-                radius = maxDim * 0.90f
+                radius = maxDim * 0.85f
             ),
             size = size
         )
-
-        // 4. Subtle deeper lower-left grounding gradient in same hue family
-        drawRect(
-            brush = Brush.radialGradient(
-                colors = listOf(
-                    animTertiary.copy(alpha = 0.42f),
-                    animTertiary.copy(alpha = 0.16f),
-                    Color.Transparent
-                ),
-                center = Offset(w * 0.18f, h * 0.88f),
-                radius = maxDim * 0.78f
-            ),
-            size = size
-        )
-
-        // 5. Anti-banding micro-dither grain
-        if (lightDitherOffsets.isEmpty() && w > 0f && h > 0f) {
-            var i = 0
-            while (i < NOISE_POINTS_LIGHT.size) {
-                lightDitherOffsets.add(Offset(NOISE_POINTS_LIGHT[i] * w, NOISE_POINTS_LIGHT[i + 1] * h))
-                darkDitherOffsets.add(Offset(NOISE_POINTS_DARK[i] * w, NOISE_POINTS_DARK[i + 1] * h))
-                i += 2
-            }
-        }
-        if (lightDitherOffsets.isNotEmpty()) {
-            drawPoints(
-                points = lightDitherOffsets,
-                pointMode = PointMode.Points,
-                color = Color(0x06FFFFFF),
-                strokeWidth = 1.5f,
-                cap = StrokeCap.Round
-            )
-            drawPoints(
-                points = darkDitherOffsets,
-                pointMode = PointMode.Points,
-                color = Color(0x06000000),
-                strokeWidth = 1.5f,
-                cap = StrokeCap.Round
-            )
-        }
     }
 }

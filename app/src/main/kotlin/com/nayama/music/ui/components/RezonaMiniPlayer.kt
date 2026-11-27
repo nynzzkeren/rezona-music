@@ -77,26 +77,6 @@ fun RezonaMiniPlayer(
     val duration = controller.durationMs.longValue
     val progressFraction = if (duration > 0) (currentPosition.toFloat() / duration.toFloat()).coerceIn(0f, 1f) else 0f
 
-    val spinDeg = remember { mutableFloatStateOf(0f) }
-    val smoothSpeed by animateFloatAsState(
-        targetValue = if (isPlaying) 28f else 0f,
-        animationSpec = tween(durationMillis = 550, easing = FastOutSlowInEasing),
-        label = "mini_vinyl_speed"
-    )
-    LaunchedEffect(isPlaying, smoothSpeed > 0.05f) {
-        if (!isPlaying && smoothSpeed <= 0.05f) return@LaunchedEffect
-        var lastNanos = 0L
-        while (isPlaying || smoothSpeed > 0.05f) {
-            withFrameNanos { nowNanos ->
-                if (lastNanos != 0L) {
-                    val dt = ((nowNanos - lastNanos) / 1_000_000_000f).coerceIn(0f, 0.06f)
-                    spinDeg.floatValue = (spinDeg.floatValue + smoothSpeed * dt) % 360f
-                }
-                lastNanos = nowNanos
-            }
-        }
-    }
-
     var dragOffsetX by remember { mutableFloatStateOf(0f) }
     val animatedOffsetX by animateFloatAsState(
         targetValue = dragOffsetX,
@@ -178,31 +158,22 @@ fun RezonaMiniPlayer(
                         .padding(start = 10.dp, end = 8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
-                    // Spinning Circular Vinyl Cover Disc with center spindle ring
-                    val discSize = if (isNavFolded) 40.dp else 44.dp
+                    // Sleek Rounded-Square Crystal Cover Art Thumbnail (Zero per-frame spin lag!)
+                    val coverSize = if (isNavFolded) 42.dp else 46.dp
+                    val coverShape = RoundedCornerShape(14.dp)
                     Box(
                         modifier = Modifier
-                            .size(discSize)
-                            .graphicsLayer {
-                                rotationZ = spinDeg.floatValue
-                            }
-                            .clip(CircleShape)
-                            .border(width = 1.dp, brush = SpecularCardBorder, shape = CircleShape),
+                            .size(coverSize)
+                            .clip(coverShape)
+                            .border(width = 1.dp, brush = SpecularCardBorder, shape = coverShape),
                         contentAlignment = Alignment.Center
                     ) {
                         RezonaAsyncCoverArt(
                             coverArtUrl = track.coverArtUrl,
                             fallbackIndex = track.index,
                             contentDescription = track.title,
-                            shape = CircleShape,
+                            shape = coverShape,
                             modifier = Modifier.fillMaxSize()
-                        )
-                        Box(
-                            modifier = Modifier
-                                .size(9.dp)
-                                .clip(CircleShape)
-                                .background(Color(0xD907090D))
-                                .border(0.8.dp, PureWhite.copy(alpha = 0.65f), CircleShape)
                         )
                     }
 

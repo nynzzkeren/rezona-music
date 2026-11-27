@@ -193,37 +193,38 @@ fun RezonaIosMusicCardOverlay(
                 horizontalArrangement = Arrangement.Center,
                 modifier = Modifier.padding(horizontal = 12.dp)
             ) {
-                // Main iOS Frosted Control Center Music Card (exact match to user's reference photo)
+                // Main iOS Frosted Control Center Music Card (with rich cover-tinted glass & double rim)
                 val cardShape = RoundedCornerShape(42.dp)
                 Box(
                     modifier = Modifier
-                        .width(304.dp)
-                        .shadow(28.dp, cardShape)
+                        .width(306.dp)
+                        .shadow(32.dp, cardShape)
                         .clip(cardShape)
                         .background(
                             Brush.verticalGradient(
                                 colors = listOf(
-                                    Color(0xEE666C76),
-                                    Color(0xEE464B54),
-                                    Color(0xF2343840)
+                                    Color(0xF0565C68),
+                                    Color(0xF2383D46),
+                                    Color(0xF522262E)
                                 )
                             )
                         )
                         .background(
                             Brush.radialGradient(
                                 colors = listOf(
-                                    ambientColor.copy(alpha = 0.28f),
+                                    ambientColor.copy(alpha = 0.42f),
+                                    ambientColor.copy(alpha = 0.16f),
                                     Color.Transparent
                                 ),
-                                radius = 520f
+                                radius = 560f
                             )
                         )
                         .border(
-                            width = 1.dp,
+                            width = 1.2.dp,
                             brush = Brush.verticalGradient(
                                 listOf(
-                                    Color.White.copy(alpha = 0.34f),
-                                    Color.White.copy(alpha = 0.10f)
+                                    Color.White.copy(alpha = 0.48f),
+                                    Color.White.copy(alpha = 0.14f)
                                 )
                             ),
                             shape = cardShape

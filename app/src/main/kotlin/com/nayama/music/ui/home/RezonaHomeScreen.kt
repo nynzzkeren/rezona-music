@@ -253,6 +253,7 @@ fun RezonaHomeScreen(
 
     var menuTrack by remember { mutableStateOf<RezonaTrack?>(null) }
     var showEqualizer by remember { mutableStateOf(false) }
+    var show3dPosterStudio by remember { mutableStateOf(false) }
 
     suspend fun loadHomeData(forceRefresh: Boolean = false) {
         coroutineScope {
@@ -478,7 +479,7 @@ fun RezonaHomeScreen(
                     }
                 }
 
-                // ── 3. FEATURED VINYL-SLEEVE PRISM HERO DECK ─────────────────────
+                // ── 3. FEATURED CRYSTAL BANNER HERO DECK (NO VINYL PLATTER) ──────
                 item(key = "home_vinyl_spotlight") {
                     Crossfade(targetState = spotlightLead, label = "hero_spotlight_xfade") { heroTrack ->
                         RezonaGlassCard(
@@ -497,60 +498,24 @@ fun RezonaHomeScreen(
                                     .padding(16.dp),
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
-                                // Sleeve + peeking vinyl disc
-                                Box(
+                                // Clean Full Rounded-Square Crystal Album Banner
+                                RezonaAsyncCoverArt(
+                                    coverArtUrl = heroTrack.coverArtUrl,
+                                    fallbackIndex = heroTrack.index,
+                                    shape = RoundedCornerShape(20.dp),
                                     modifier = Modifier
-                                        .width(122.dp)
-                                        .height(100.dp),
-                                    contentAlignment = Alignment.CenterStart
-                                ) {
-                                    // Peeking dark vinyl disc on right
-                                    Box(
-                                        modifier = Modifier
-                                            .size(88.dp)
-                                            .offset(x = 32.dp)
-                                            .clip(CircleShape)
-                                            .background(
-                                                Brush.radialGradient(
-                                                    listOf(
-                                                        Color(0xFF2B2F3A),
-                                                        Color(0xFF0E1015),
-                                                        Color(0xFF1D2028),
-                                                        Color(0xFF090A0E)
-                                                    )
-                                                )
-                                            )
-                                            .border(1.dp, Color(0x38FFFFFF), CircleShape),
-                                        contentAlignment = Alignment.Center
-                                    ) {
-                                        Box(
-                                            modifier = Modifier
-                                                .size(22.dp)
-                                                .clip(CircleShape)
-                                                .background(Color(0x55FFFFFF))
-                                                .border(1.dp, PureWhite.copy(alpha = 0.6f), CircleShape)
-                                        )
-                                    }
+                                        .size(104.dp)
+                                        .border(1.2.dp, SpecularCardBorder, RoundedCornerShape(20.dp))
+                                )
 
-                                    // Front sleeve cover
-                                    RezonaAsyncCoverArt(
-                                        coverArtUrl = heroTrack.coverArtUrl,
-                                        fallbackIndex = heroTrack.index,
-                                        shape = RoundedCornerShape(18.dp),
-                                        modifier = Modifier
-                                            .size(98.dp)
-                                            .border(1.dp, SpecularCardBorder, RoundedCornerShape(18.dp))
-                                    )
-                                }
-
-                                Spacer(modifier = Modifier.width(14.dp))
+                                Spacer(modifier = Modifier.width(16.dp))
 
                                 Column(
                                     modifier = Modifier.weight(1f),
                                     verticalArrangement = Arrangement.spacedBy(4.dp)
                                 ) {
                                     Text(
-                                        text = selectedMood?.let { "$it Session" } ?: "Featured Rotation",
+                                        text = selectedMood?.let { "$it Session" } ?: "Featured Banner",
                                         style = Typography.labelSmall.copy(fontSize = 11.sp, fontWeight = FontWeight.SemiBold),
                                         color = SoftSilver
                                     )
@@ -568,7 +533,7 @@ fun RezonaHomeScreen(
                                         maxLines = 1,
                                         overflow = TextOverflow.Ellipsis
                                     )
-                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Spacer(modifier = Modifier.height(6.dp))
                                     Row(
                                         verticalAlignment = Alignment.CenterVertically,
                                         horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -582,7 +547,7 @@ fun RezonaHomeScreen(
                                                     val queueTitle = selectedMood?.let { "$it Frequency" } ?: "Spotlight Mix"
                                                     controller.playQueue(spotlightPool.take(20), 0, queueTitle)
                                                 }
-                                                .padding(horizontal = 14.dp),
+                                                .padding(horizontal = 13.dp),
                                             contentAlignment = Alignment.Center
                                         ) {
                                             Row(
@@ -601,6 +566,22 @@ fun RezonaHomeScreen(
                                                     color = Color(0xFF07090D)
                                                 )
                                             }
+                                        }
+                                        Box(
+                                            modifier = Modifier
+                                                .height(34.dp)
+                                                .clip(CircleShape)
+                                                .background(Color(0x24FFFFFF))
+                                                .border(0.8.dp, Color(0x44FFFFFF), CircleShape)
+                                                .clickable { show3dPosterStudio = true }
+                                                .padding(horizontal = 11.dp),
+                                            contentAlignment = Alignment.Center
+                                        ) {
+                                            Text(
+                                                text = "3D Poster",
+                                                style = Typography.labelSmall.copy(fontWeight = FontWeight.ExtraBold),
+                                                color = PureWhite
+                                            )
                                         }
                                         Box(
                                             modifier = Modifier
@@ -961,7 +942,16 @@ fun RezonaHomeScreen(
             controller = controller,
             showVolumeSlider = false,
             onDismiss = { menuTrack = null },
-            onOpenEqualizer = { showEqualizer = true }
+            onOpenEqualizer = { showEqualizer = true },
+            onOpen3dSongPoster = { show3dPosterStudio = true }
+        )
+    }
+
+    if (show3dPosterStudio) {
+        com.nayama.music.ui.lyrics.RezonaFloatingSongPosterStudio(
+            initialTrack = controller.currentTrack.value ?: spotlightLead,
+            queueTracks = spotlightPool.take(5),
+            onDismiss = { show3dPosterStudio = false }
         )
     }
 

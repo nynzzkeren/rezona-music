@@ -224,7 +224,7 @@ class RezonaPreferences(private val context: Context) {
     }
 
     val keepAliveOnSwipeFlow: Flow<Boolean> = context.dataStore.data.map { prefs ->
-        prefs[KEY_KEEP_ALIVE_ON_SWIPE] ?: true
+        prefs[KEY_KEEP_ALIVE_ON_SWIPE] ?: false
     }
 
     val musicAlarmEnabledFlow: Flow<Boolean> = context.dataStore.data.map { prefs ->

@@ -7,80 +7,92 @@
     android:orientation="vertical"
     android:padding="14dp">
 
-    <!-- Top: Large rounded album art (Auralys-style sleek Liquid Glass card) -->
-    <ImageView
-        android:id="@+id/widget_cover"
-        android:layout_width="108dp"
-        android:layout_height="108dp"
-        android:scaleType="centerCrop"
-        android:src="@drawable/ic_rezona_logo"
-        android:background="@drawable/rezona_widget_pill_bg"
-        android:contentDescription="Album cover" />
-
-    <!-- Middle: Title + Artist on left, play streak/count badge on right -->
-    <RelativeLayout
+    <!-- Top Row: Rounded-Square Cover Art on left + Title/Artist & Streak Badge on right -->
+    <LinearLayout
         android:id="@+id/widget_meta"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginTop="12dp">
-
-        <TextView
-            android:id="@+id/widget_streak_badge"
-            android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:layout_alignParentEnd="true"
-            android:layout_alignParentTop="true"
-            android:text="♪ 0"
-            android:textColor="#CCFFFFFF"
-            android:textSize="12sp"
-            android:textStyle="bold" />
-
-        <TextView
-            android:id="@+id/widget_title"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_alignParentStart="true"
-            android:layout_toStartOf="@id/widget_streak_badge"
-            android:layout_marginEnd="8dp"
-            android:text="No song playing"
-            android:textColor="#FFFFFFFF"
-            android:textSize="16sp"
-            android:textStyle="bold"
-            android:maxLines="1"
-            android:ellipsize="end" />
-
-        <TextView
-            android:id="@+id/widget_artist"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_below="@id/widget_title"
-            android:layout_marginTop="2dp"
-            android:text="Tap to open Rezona"
-            android:textColor="#B8FFFFFF"
-            android:textSize="13sp"
-            android:maxLines="1"
-            android:ellipsize="end" />
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
 
         <ImageView
-            android:id="@+id/widget_lyric_canvas"
-            android:layout_width="match_parent"
-            android:layout_height="56dp"
-            android:layout_below="@id/widget_artist"
-            android:layout_marginTop="6dp"
+            android:id="@+id/widget_cover"
+            android:layout_width="64dp"
+            android:layout_height="64dp"
+            android:scaleType="centerCrop"
+            android:src="@drawable/ic_rezona_logo"
             android:background="@drawable/rezona_widget_pill_bg"
-            android:paddingStart="10dp"
-            android:paddingEnd="10dp"
-            android:paddingTop="4dp"
-            android:paddingBottom="4dp"
-            android:scaleType="fitCenter"
-            android:contentDescription="Synced lyrics" />
-    </RelativeLayout>
+            android:contentDescription="Album cover" />
+
+        <RelativeLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:layout_marginStart="12dp">
+
+            <TextView
+                android:id="@+id/widget_streak_badge"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_alignParentEnd="true"
+                android:layout_alignParentTop="true"
+                android:background="@drawable/rezona_widget_pill_bg"
+                android:paddingStart="8dp"
+                android:paddingEnd="8dp"
+                android:paddingTop="2dp"
+                android:paddingBottom="2dp"
+                android:text="♪ 0"
+                android:textColor="#F0FFFFFF"
+                android:textSize="11sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:id="@+id/widget_title"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_alignParentStart="true"
+                android:layout_toStartOf="@id/widget_streak_badge"
+                android:layout_marginEnd="6dp"
+                android:text="No song playing"
+                android:textColor="#FFFFFFFF"
+                android:textSize="15.5sp"
+                android:textStyle="bold"
+                android:maxLines="1"
+                android:ellipsize="end" />
+
+            <TextView
+                android:id="@+id/widget_artist"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:layout_below="@id/widget_title"
+                android:layout_marginTop="3dp"
+                android:text="Tap to open Rezona"
+                android:textColor="#B8FFFFFF"
+                android:textSize="12.5sp"
+                android:maxLines="1"
+                android:ellipsize="end" />
+        </RelativeLayout>
+    </LinearLayout>
+
+    <!-- Middle Full-Width Section: 3-Line Styled Lyrics Canvas matching in-app LyricsStyleConfig -->
+    <ImageView
+        android:id="@+id/widget_lyric_canvas"
+        android:layout_width="match_parent"
+        android:layout_height="56dp"
+        android:layout_marginTop="8dp"
+        android:background="@drawable/rezona_widget_pill_bg"
+        android:paddingStart="10dp"
+        android:paddingEnd="10dp"
+        android:paddingTop="4dp"
+        android:paddingBottom="4dp"
+        android:scaleType="fitCenter"
+        android:contentDescription="Synced lyrics" />
 
     <ProgressBar
         android:id="@+id/widget_progress"
         style="?android:attr/progressBarStyleHorizontal"
         android:layout_width="match_parent"
-        android:layout_height="3dp"
+        android:layout_height="3.5dp"
         android:layout_marginTop="8dp"
         android:max="1000"
         android:progress="0"
@@ -90,8 +102,8 @@
     <LinearLayout
         android:id="@+id/widget_controls"
         android:layout_width="match_parent"
-        android:layout_height="50dp"
-        android:layout_marginTop="8dp"
+        android:layout_height="46dp"
+        android:layout_marginTop="6dp"
         android:gravity="center_vertical"
         android:orientation="horizontal">
 

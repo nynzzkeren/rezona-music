@@ -1,23 +1,23 @@
 <?xml version="1.0" encoding="utf-8"?>
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
-    <!-- Deep translucent dark frosted base -->
+    <!-- Deep refractive Liquid Glass base -->
     <item>
         <shape android:shape="rectangle">
-            <corners android:radius="26dp" />
+            <corners android:radius="28dp" />
             <gradient
-                android:angle="270"
-                android:startColor="#CC2B313B"
-                android:centerColor="#D6191D24"
-                android:endColor="#E0101217" />
+                android:angle="315"
+                android:startColor="#E6363E4D"
+                android:centerColor="#EC1E232D"
+                android:endColor="#F40E1117" />
         </shape>
     </item>
-    <!-- Specular white glass rim highlight along top/sides -->
+    <!-- Specular silver-white glass rim highlight -->
     <item>
         <shape android:shape="rectangle">
-            <corners android:radius="26dp" />
+            <corners android:radius="28dp" />
             <stroke
-                android:width="1dp"
-                android:color="#52FFFFFF" />
+                android:width="1.3dp"
+                android:color="#6BFFFFFF" />
             <solid android:color="#00000000" />
         </shape>
     </item>
