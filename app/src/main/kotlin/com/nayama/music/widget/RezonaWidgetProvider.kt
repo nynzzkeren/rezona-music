@@ -13,6 +13,8 @@ import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
 import android.graphics.RectF
 import android.os.Build
+import android.text.TextPaint
+import android.text.TextUtils
 import android.widget.RemoteViews
 import androidx.core.graphics.drawable.toBitmap
 import coil.imageLoader
@@ -20,11 +22,15 @@ import coil.request.ImageRequest
 import coil.request.SuccessResult
 import com.nayama.music.MainActivity
 import com.nayama.music.R
+import com.nayama.music.data.preferences.RezonaPreferences
 import com.nayama.music.playback.NayamaMediaService
 import com.nayama.music.playback.RezonaPlayerController
+import com.nayama.music.ui.lyrics.LyricsFontWeightOption
+import com.nayama.music.ui.lyrics.LyricsStyleConfig
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 
 class RezonaWidgetProvider : AppWidgetProvider() {
@@ -65,21 +71,27 @@ object RezonaWidgetUpdater {
         val progress = if (durMs > 0L) ((posMs * 1000L) / durMs).toInt().coerceIn(0, 1000) else 0
         val artUrl = track?.coverArtUrl.orEmpty()
         val lyrics = controller?.currentLyrics?.value.orEmpty()
-        val activeLyric = if (lyrics.isNotEmpty()) {
-            val idx = lyrics.indexOfLast { it.timeMs <= posMs + 180L }
-            (if (idx >= 0) lyrics.getOrNull(idx)?.text else lyrics.firstOrNull()?.text)?.takeIf { it.isNotBlank() }
-        } else null
-        val lyricText = when {
-            !activeLyric.isNullOrBlank() -> "♪ $activeLyric"
-            track != null -> "♪ ${track.artist} — ${track.title}"
-            else -> "♪ Open Rezona to start music"
+        val activeIdx = if (lyrics.isNotEmpty()) {
+            lyrics.indexOfLast { it.timeMs <= posMs + 180L }
+        } else -1
+        val prevLyric = if (activeIdx > 0) lyrics.getOrNull(activeIdx - 1)?.text else null
+        val currLyric = when {
+            activeIdx >= 0 -> lyrics.getOrNull(activeIdx)?.text
+            lyrics.isNotEmpty() -> lyrics.firstOrNull()?.text
+            track != null -> "${track.artist} — ${track.title}"
+            else -> "Open Rezona to start music"
         }
+        val nextLyric = if (activeIdx >= 0) lyrics.getOrNull(activeIdx + 1)?.text else lyrics.getOrNull(1)?.text
+        val lyricText = if (!currLyric.isNullOrBlank()) "♪ $currLyric" else "♪ Open Rezona to start music"
         val streakText = "♪ ${cachedPlayCount.coerceAtLeast(if (track != null) 1 else 0)}"
 
         val initialBmp = if (artUrl.isNotBlank() && artUrl == cachedArtUrl) cachedArtBitmap else null
-        pushRemoteViews(appCtx, manager, cardIds, compactIds, title, artist, lyricText, streakText, isPlaying, isLiked, progress, initialBmp)
+        val initialLyricBmp = renderLyricsStyleBitmap(appCtx, prevLyric, currLyric, nextLyric, cachedLyricsStyle)
+        pushRemoteViews(appCtx, manager, cardIds, compactIds, title, artist, lyricText, initialLyricBmp, streakText, isPlaying, isLiked, progress, initialBmp)
 
         scope.launch {
+            val style = runCatching { RezonaPreferences(appCtx).lyricsStyleFlow.first() }.getOrDefault(cachedLyricsStyle)
+            cachedLyricsStyle = style
             val totalPlays = runCatching {
                 com.nayama.music.data.local.RezonaDatabase.getInstance(appCtx)
                     .historyDao().getAllEntriesRaw(500).count { !it.deleted }
@@ -90,16 +102,17 @@ object RezonaWidgetUpdater {
                 cachedArtUrl = artUrl
                 cachedArtBitmap = bmp
             }
-            if (totalPlays != cachedPlayCount || needsArt) {
-                cachedPlayCount = totalPlays
-                val updatedStreak = "♪ ${totalPlays.coerceAtLeast(if (track != null) 1 else 0)}"
-                pushRemoteViews(appCtx, manager, cardIds, compactIds, title, artist, lyricText, updatedStreak, isPlaying, isLiked, progress, bmp)
-            }
+            val lyricBmp = renderLyricsStyleBitmap(appCtx, prevLyric, currLyric, nextLyric, style)
+            cachedPlayCount = totalPlays
+            val updatedStreak = "♪ ${totalPlays.coerceAtLeast(if (track != null) 1 else 0)}"
+            pushRemoteViews(appCtx, manager, cardIds, compactIds, title, artist, lyricText, lyricBmp, updatedStreak, isPlaying, isLiked, progress, bmp)
         }
     }
 
     @Volatile
     private var cachedPlayCount: Int = 0
+    @Volatile
+    private var cachedLyricsStyle: LyricsStyleConfig = LyricsStyleConfig()
 
     private fun pushRemoteViews(
         context: Context,
@@ -109,6 +122,7 @@ object RezonaWidgetUpdater {
         title: String,
         artist: String,
         lyricText: String,
+        lyricBitmap: Bitmap?,
         streakText: String,
         isPlaying: Boolean,
         isLiked: Boolean,
@@ -140,7 +154,9 @@ object RezonaWidgetUpdater {
             val rv = RemoteViews(context.packageName, R.layout.widget_rezona_card)
             rv.setTextViewText(R.id.widget_title, title)
             rv.setTextViewText(R.id.widget_artist, artist)
-            rv.setTextViewText(R.id.widget_lyric_line, lyricText)
+            if (lyricBitmap != null) {
+                rv.setImageViewBitmap(R.id.widget_lyric_canvas, lyricBitmap)
+            }
             rv.setTextViewText(R.id.widget_streak_badge, streakText)
             rv.setProgressBar(R.id.widget_progress, 1000, progress, false)
             rv.setImageViewResource(R.id.widget_btn_play, playIcon)
@@ -222,6 +238,58 @@ object RezonaWidgetUpdater {
             paint.xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN)
             canvas.drawBitmap(raw, 0f, 0f, paint)
             out
+        }.getOrNull()
+    }
+
+    /**
+     * Renders 3-line synced lyrics (previous dimmed · active highlighted · next dimmed)
+     * using the exact font family, weight, italic, and alignment from the user's in-app [LyricsStyleConfig].
+     */
+    private fun renderLyricsStyleBitmap(
+        context: Context,
+        prevLine: String?,
+        currLine: String?,
+        nextLine: String?,
+        style: LyricsStyleConfig
+    ): Bitmap? {
+        return runCatching {
+            val w = 720
+            val h = 132
+            val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+            val canvas = Canvas(bmp)
+            val isBold = style.weight == LyricsFontWeightOption.BOLD || style.weight == LyricsFontWeightOption.BLACK
+            val typeface = style.fontFamily.loadAndroidTypeface(context, isBold = isBold, isItalic = style.isItalic)
+            val align = if (style.centerAlign) Paint.Align.CENTER else Paint.Align.LEFT
+            val x = if (style.centerAlign) w / 2f else 12f
+            val maxW = w - 24f
+
+            val dimPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+                this.typeface = style.fontFamily.loadAndroidTypeface(context, isBold = false, isItalic = style.isItalic)
+                color = 0x70FFFFFF
+                textSize = 24f
+                textAlign = align
+            }
+            val activePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+                this.typeface = typeface
+                color = 0xFFFFFFFF.toInt()
+                textSize = 31f
+                textAlign = align
+                setShadowLayer(8f, 0f, 0f, 0x55FFFFFF)
+            }
+
+            if (!prevLine.isNullOrBlank()) {
+                val ell = TextUtils.ellipsize(prevLine, dimPaint, maxW, TextUtils.TruncateAt.END).toString()
+                canvas.drawText(ell, x, 34f, dimPaint)
+            }
+            val activeText = currLine?.takeIf { it.isNotBlank() } ?: "♪ Synced lyrics ready"
+            val activeEll = TextUtils.ellipsize(activeText, activePaint, maxW, TextUtils.TruncateAt.END).toString()
+            canvas.drawText(activeEll, x, 74f, activePaint)
+
+            if (!nextLine.isNullOrBlank()) {
+                val ell = TextUtils.ellipsize(nextLine, dimPaint, maxW, TextUtils.TruncateAt.END).toString()
+                canvas.drawText(ell, x, 110f, dimPaint)
+            }
+            bmp
         }.getOrNull()
     }
 }

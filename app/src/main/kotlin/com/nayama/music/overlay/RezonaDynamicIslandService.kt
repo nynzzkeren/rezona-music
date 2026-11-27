@@ -253,8 +253,7 @@ class RezonaDynamicIslandService : Service(), LifecycleOwner, SavedStateRegistry
             return
         }
 
-        // Drive visibility + cutout positioning + topmost Z-order re-assertion from serviceScope
-        var wasVisible = false
+        // Drive visibility + cutout positioning via updateViewLayout (never detach/re-attach live ComposeView!)
         serviceScope.launch {
             combine(
                 appInForegroundFlow,
@@ -270,30 +269,31 @@ class RezonaDynamicIslandService : Service(), LifecycleOwner, SavedStateRegistry
                 val v = composeView ?: return@collectLatest
                 val p = windowParams ?: return@collectLatest
                 val placement = resolveCutoutPlacement(wm, v, cutoutMode, expanded)
-                val targetVis = if (visible) View.VISIBLE else View.INVISIBLE
-                var layoutChanged = false
+                val targetVis = if (visible) View.VISIBLE else View.GONE
+                val desiredFlags = if (visible) {
+                    p.flags and WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE.inv()
+                } else {
+                    p.flags or WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
+                }
 
+                var layoutChanged = false
                 if (p.x != placement.xOffsetPx || p.y != placement.yOffsetPx) {
                     p.x = placement.xOffsetPx
                     p.y = placement.yOffsetPx
                     layoutChanged = true
                 }
+                if (p.flags != desiredFlags) {
+                    p.flags = desiredFlags
+                    layoutChanged = true
+                }
                 if (v.visibility != targetVis) {
                     v.visibility = targetVis
                     if (!visible) isExpandedFlow.value = false
+                    layoutChanged = true
                 }
-                // Re-attach window to front of WindowManager Z-order stack whenever becoming visible or expanding
-                if (visible && (!wasVisible || expanded)) {
-                    runCatching {
-                        wm.removeViewImmediate(v)
-                        wm.addView(v, p)
-                    }.onFailure {
-                        runCatching { wm.updateViewLayout(v, p) }
-                    }
-                } else if (layoutChanged) {
+                if (layoutChanged) {
                     runCatching { wm.updateViewLayout(v, p) }
                 }
-                wasVisible = visible
             }
         }
     }
@@ -900,8 +900,15 @@ private fun ExpandedIslandGlassCard(
         verticalArrangement = Arrangement.spacedBy(11.dp)
     ) {
         // 1. Top Row (exact match with Screenshot 1): Rounded-square Cover Art + Title/Artist + 5-Bar Waveform
+        // Tapping title/artist or waveform collapses the expanded island cleanly.
         Row(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clickable(
+                    interactionSource = remember { MutableInteractionSource() },
+                    indication = null,
+                    onClick = onOpenApp
+                ),
             verticalAlignment = Alignment.CenterVertically
         ) {
             AsyncImage(
