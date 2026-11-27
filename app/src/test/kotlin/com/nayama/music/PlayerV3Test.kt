@@ -308,5 +308,54 @@ class PlayerV3Test {
         assertTrue(parsedPrivate.tracks.isEmpty())
 
         assertEquals("07:05", com.nayama.music.playback.RezonaMusicAlarmManager.formatAlarmTime(7, 5))
+
+        // First-time install on latest APK (v4) -> NO notification or popup
+        val latestInfo = RezonaUpdateChecker.parseBulletin(
+            """{"versionCode":4,"versionName":"1.0.4","announcementId":"rezona-v1.0.4-1"}""",
+            currentVersionCode = 4
+        )!!
+        assertFalse(
+            RezonaUpdateChecker.shouldShowBulletin(
+                info = latestInfo,
+                currentAppVersionCode = 4,
+                lastSeenAppVersionCode = 0,
+                dismissedUpdateVersion = 0,
+                dismissedAnnouncementId = ""
+            )
+        )
+        // Just updated from v3 -> v4 -> NO notification or popup
+        assertFalse(
+            RezonaUpdateChecker.shouldShowBulletin(
+                info = latestInfo,
+                currentAppVersionCode = 4,
+                lastSeenAppVersionCode = 3,
+                dismissedUpdateVersion = 3,
+                dismissedAnnouncementId = "rezona-v1.0.3-1"
+            )
+        )
+        // Already on v4, admin publishes a new live announcement -> SHOW
+        assertTrue(
+            RezonaUpdateChecker.shouldShowBulletin(
+                info = latestInfo.copy(announcementId = "rezona-v1.0.4-2"),
+                currentAppVersionCode = 4,
+                lastSeenAppVersionCode = 4,
+                dismissedUpdateVersion = 4,
+                dismissedAnnouncementId = "rezona-v1.0.4-1"
+            )
+        )
+        // Admin releases v5 -> SHOW New Update Released
+        val v5Info = RezonaUpdateChecker.parseBulletin(
+            """{"versionCode":5,"versionName":"1.0.5","announcementId":"rezona-v1.0.5-1"}""",
+            currentVersionCode = 4
+        )!!
+        assertTrue(
+            RezonaUpdateChecker.shouldShowBulletin(
+                info = v5Info,
+                currentAppVersionCode = 4,
+                lastSeenAppVersionCode = 4,
+                dismissedUpdateVersion = 4,
+                dismissedAnnouncementId = "rezona-v1.0.4-1"
+            )
+        )
     }
 }

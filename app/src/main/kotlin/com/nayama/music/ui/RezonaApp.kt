@@ -186,16 +186,34 @@ fun RezonaApp() {
     }
 
     LaunchedEffect(Unit) {
+        val currentVersionCode = com.nayama.music.BuildConfig.VERSION_CODE
+        val lastSeenAppVersion = preferences.lastSeenAppVersionCodeFlow.first()
         val dismissedVersion = preferences.dismissedUpdateVersionFlow.first()
         val dismissedAnnouncement = preferences.dismissedAnnouncementIdFlow.first()
         val info = RezonaUpdateChecker.checkForUpdate()
+
         if (info != null) {
-            val isUnreadAnnouncement = info.announcementId.isNotBlank() && info.announcementId != dismissedAnnouncement
-            val isUnreadUpdate = info.isNewerApk && info.versionCode > dismissedVersion
-            if (isUnreadUpdate || isUnreadAnnouncement) {
+            val shouldShow = RezonaUpdateChecker.shouldShowBulletin(
+                info = info,
+                currentAppVersionCode = currentVersionCode,
+                lastSeenAppVersionCode = lastSeenAppVersion,
+                dismissedUpdateVersion = dismissedVersion,
+                dismissedAnnouncementId = dismissedAnnouncement
+            )
+            if (shouldShow) {
                 availableUpdate = info
                 RezonaUpdateChecker.postSystemAnnouncementNotification(context, info)
+            } else if (!info.isNewerApk && lastSeenAppVersion < currentVersionCode) {
+                // First-time install or fresh update to the latest APK: silently mark baseline as seen
+                // so no redundant "update" or old changelog notification pops up.
+                if (info.announcementId.isNotBlank()) {
+                    preferences.setDismissedAnnouncementId(info.announcementId)
+                }
+                preferences.setDismissedUpdateVersion(currentVersionCode)
             }
+        }
+        if (lastSeenAppVersion < currentVersionCode) {
+            preferences.setLastSeenAppVersionCode(currentVersionCode)
         }
     }
 

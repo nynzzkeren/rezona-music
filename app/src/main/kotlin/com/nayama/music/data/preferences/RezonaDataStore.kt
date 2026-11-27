@@ -79,6 +79,7 @@ class RezonaPreferences(private val context: Context) {
         val KEY_SKIP_INTRO_ENABLED = booleanPreferencesKey("playback_skip_intro_enabled")
         val KEY_DISMISSED_UPDATE_VERSION = intPreferencesKey("update_dismissed_version_code")
         val KEY_DISMISSED_ANNOUNCEMENT_ID = stringPreferencesKey("update_dismissed_announcement_id")
+        val KEY_LAST_SEEN_APP_VERSION_CODE = intPreferencesKey("update_last_seen_app_version_code")
 
         // Privacy & History
         val KEY_PAUSE_HISTORY = booleanPreferencesKey("privacy_pause_history")
@@ -298,8 +299,16 @@ class RezonaPreferences(private val context: Context) {
         prefs[KEY_DISMISSED_ANNOUNCEMENT_ID] ?: ""
     }
 
+    val lastSeenAppVersionCodeFlow: Flow<Int> = context.dataStore.data.map { prefs ->
+        prefs[KEY_LAST_SEEN_APP_VERSION_CODE] ?: 0
+    }
+
     suspend fun setDismissedAnnouncementId(id: String) {
         context.dataStore.edit { prefs -> prefs[KEY_DISMISSED_ANNOUNCEMENT_ID] = id }
+    }
+
+    suspend fun setLastSeenAppVersionCode(versionCode: Int) {
+        context.dataStore.edit { prefs -> prefs[KEY_LAST_SEEN_APP_VERSION_CODE] = versionCode }
     }
 
     val dynamicIslandEnabledFlow: Flow<Boolean> = context.dataStore.data.map { prefs ->
