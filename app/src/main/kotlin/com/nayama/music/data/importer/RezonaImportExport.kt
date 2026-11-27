@@ -2,20 +2,27 @@ package com.nayama.music.data.importer
 
 import android.content.Context
 import android.net.Uri
+import com.nayama.music.backend.MusicEngineRepository
+import com.nayama.music.backend.innertube.InnerTubeFilter
 import com.nayama.music.data.local.LikedTrackEntity
 import com.nayama.music.data.local.PlaylistEntity
 import com.nayama.music.data.local.PlaylistTrackCrossRef
 import com.nayama.music.data.local.RezonaDatabase
 import com.nayama.music.data.local.TrackEntity
 import com.nayama.music.data.repository.RezonaLibraryRepository
+import com.nayama.music.data.repository.toTrackEntity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
 import kotlinx.serialization.json.Json
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import org.json.JSONObject
 import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.util.UUID
+import java.util.concurrent.TimeUnit
 
 data class ImportResult(
     val playlistName: String,
@@ -78,6 +85,12 @@ data class RezonaBackupPayload(
 
 object RezonaImportExportManager {
     private val YOUTUBE_MUSIC_PLAYLIST_REGEX = Regex("""^https?://(music\.|www\.)?youtube\.com/playlist\?list=([a-zA-Z0-9_-]+).*$""")
+    private val SPOTIFY_PLAYLIST_REGEX = Regex("""^https?://open\.spotify\.com/(?:intl-[a-zA-Z-]+/)?playlist/([a-zA-Z0-9]+).*$""")
+
+    private val httpClient = OkHttpClient.Builder()
+        .connectTimeout(8, TimeUnit.SECONDS)
+        .readTimeout(10, TimeUnit.SECONDS)
+        .build()
 
     private val jsonEngine = Json {
         ignoreUnknownKeys = true
@@ -86,6 +99,180 @@ object RezonaImportExportManager {
     }
 
     fun isYouTubeMusicPlaylistUrl(url: String): Boolean = YOUTUBE_MUSIC_PLAYLIST_REGEX.matches(url.trim())
+
+    fun isSpotifyPlaylistUrl(url: String): Boolean = SPOTIFY_PLAYLIST_REGEX.matches(url.trim())
+
+    fun extractSpotifyPlaylistId(url: String): String? =
+        SPOTIFY_PLAYLIST_REGEX.find(url.trim())?.groupValues?.getOrNull(1)
+
+    data class ParsedSpotifyPlaylist(
+        val title: String,
+        val isPublic: Boolean,
+        val tracks: List<Pair<String, String>> // (title, artist)
+    )
+
+    /**
+     * Parses Spotify embed HTML (`https://open.spotify.com/embed/playlist/{id}`).
+     * Returns isPublic = false if the playlist is Private / Not Found / Restricted.
+     */
+    fun parseSpotifyEmbedHtml(html: String): ParsedSpotifyPlaylist {
+        val trimmed = html.trim()
+        if (trimmed.isEmpty() ||
+            trimmed.contains("Page not found", ignoreCase = true) ||
+            trimmed.contains("\"status\":404") ||
+            trimmed.contains("\"status\":403") ||
+            trimmed.contains("This playlist is private", ignoreCase = true)
+        ) {
+            return ParsedSpotifyPlaylist(title = "", isPublic = false, tracks = emptyList())
+        }
+
+        // 1. Parse __NEXT_DATA__ JSON inside Spotify Embed HTML
+        val nextDataMatch = Regex("""<script id="__NEXT_DATA__"[^>]*>(.*?)</script>""", RegexOption.DOT_MATCHES_ALL)
+            .find(trimmed)
+        if (nextDataMatch != null) {
+            val rawJson = nextDataMatch.groupValues[1]
+            val parsed = runCatching {
+                val root = JSONObject(rawJson)
+                val entity = root.optJSONObject("props")
+                    ?.optJSONObject("pageProps")
+                    ?.optJSONObject("state")
+                    ?.optJSONObject("data")
+                    ?.optJSONObject("entity")
+                if (entity == null) {
+                    ParsedSpotifyPlaylist("", isPublic = false, tracks = emptyList())
+                } else {
+                    val plTitle = entity.optString("name", "").ifBlank {
+                        entity.optString("title", "Spotify Public Playlist")
+                    }
+                    val trackList = entity.optJSONArray("trackList")
+                    val list = mutableListOf<Pair<String, String>>()
+                    if (trackList != null) {
+                        for (i in 0 until trackList.length()) {
+                            val item = trackList.optJSONObject(i) ?: continue
+                            val t = item.optString("title", "").trim()
+                            val a = item.optString("subtitle", "").replace("\u00A0", " ").trim()
+                            if (t.isNotEmpty()) {
+                                list.add(t to a)
+                            }
+                        }
+                    }
+                    ParsedSpotifyPlaylist(
+                        title = plTitle,
+                        isPublic = list.isNotEmpty(),
+                        tracks = list
+                    )
+                }
+            }.getOrNull()
+            if (parsed != null && parsed.isPublic) return parsed
+        }
+
+        return ParsedSpotifyPlaylist(title = "", isPublic = false, tracks = emptyList())
+    }
+
+    /**
+     * Imports a PUBLIC Spotify playlist by URL (`https://open.spotify.com/playlist/...`).
+     * Rejects private or inaccessible playlists with an explicit message requiring the playlist to be Public.
+     */
+    suspend fun importSpotifyPublicPlaylist(
+        context: Context,
+        url: String,
+        repository: RezonaLibraryRepository
+    ): ImportResult = withContext(Dispatchers.IO) {
+        val playlistId = extractSpotifyPlaylistId(url)
+            ?: throw IllegalArgumentException("Invalid Spotify playlist URL. Example: https://open.spotify.com/playlist/...")
+
+        // Step 1: Check oEmbed endpoint — returns 404/403/400 for Private Spotify playlists
+        val oembedUrl = "https://open.spotify.com/oembed?url=https://open.spotify.com/playlist/$playlistId"
+        val oembedTitle = runCatching {
+            val req = Request.Builder()
+                .url(oembedUrl)
+                .header("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/124.0.0.0 Mobile Safari/537.36")
+                .get()
+                .build()
+            httpClient.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) {
+                    throw IllegalStateException("PRIVATE_OR_NOT_FOUND")
+                }
+                JSONObject(resp.body?.string().orEmpty()).optString("title", "").trim()
+            }
+        }.getOrElse { err ->
+            if (err.message == "PRIVATE_OR_NOT_FOUND") {
+                throw IllegalArgumentException(
+                    "Spotify playlist is Private or unavailable! Please set the playlist to PUBLIC in Spotify first."
+                )
+            }
+            ""
+        }
+
+        // Step 2: Fetch public embed tracklist
+        val embedUrl = "https://open.spotify.com/embed/playlist/$playlistId"
+        val embedHtml = runCatching {
+            val req = Request.Builder()
+                .url(embedUrl)
+                .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/124.0.0.0 Safari/537.36")
+                .get()
+                .build()
+            httpClient.newCall(req).execute().use { resp ->
+                if (!resp.isSuccessful) "" else resp.body?.string().orEmpty()
+            }
+        }.getOrDefault("")
+
+        val parsed = parseSpotifyEmbedHtml(embedHtml)
+        if (!parsed.isPublic || parsed.tracks.isEmpty()) {
+            throw IllegalArgumentException(
+                "Cannot import this Spotify playlist because it is Private or empty. Make sure the playlist is set to Public in Spotify!"
+            )
+        }
+
+        val finalTitle = parsed.title.ifBlank { oembedTitle }.ifBlank { "Spotify Public Playlist" }
+        val musicEngine = MusicEngineRepository.getInstance(context)
+        val db = RezonaDatabase.getInstance(context)
+        val allCatalogTracks = repository.getAllTracks().first()
+
+        val foundTrackIds = mutableListOf<String>()
+        val notFoundList = mutableListOf<String>()
+        val tracksToProcess = parsed.tracks.take(35)
+
+        for ((songTitle, songArtist) in tracksToProcess) {
+            val query = "$songTitle $songArtist".trim()
+            // Match against local catalog or search YouTube Music live
+            val localMatch = allCatalogTracks.find {
+                it.title.equals(songTitle, ignoreCase = true)
+            }
+            if (localMatch != null) {
+                foundTrackIds.add(localMatch.id)
+            } else {
+                val ytMatch = runCatching {
+                    musicEngine.innerTubeRepo.search(query, InnerTubeFilter.SONGS).firstOrNull()
+                }.getOrNull()
+                if (ytMatch != null) {
+                    db.trackDao().insertTrack(ytMatch.toTrackEntity())
+                    foundTrackIds.add(ytMatch.id)
+                } else {
+                    notFoundList.add(if (songArtist.isNotBlank()) "$songTitle - $songArtist" else songTitle)
+                }
+            }
+        }
+
+        if (foundTrackIds.isEmpty()) {
+            throw IllegalArgumentException("Could not match tracks from Spotify playlist '$finalTitle'. Check your internet connection.")
+        }
+
+        val createdId = repository.createPlaylist(
+            title = finalTitle,
+            description = "Imported from Public Spotify Playlist (${foundTrackIds.size} tracks)",
+            sourceBlend = "SPOTIFY"
+        )
+        repository.addTracksToPlaylist(createdId, foundTrackIds.distinct())
+
+        ImportResult(
+            playlistName = finalTitle,
+            totalProcessed = tracksToProcess.size,
+            songsFoundCount = foundTrackIds.distinct().size,
+            notFoundSongs = notFoundList.take(5),
+            createdPlaylistId = createdId
+        )
+    }
 
     /**
      * Imports from YouTube Music playlist link.

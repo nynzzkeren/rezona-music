@@ -101,6 +101,10 @@ fun RezonaApp() {
     val scope = rememberCoroutineScope()
 
     val dockFoldEnabled by preferences.dockFoldOnScrollFlow.collectAsState(initial = true)
+    val glassIntensityPref by preferences.glassIntensityFlow.collectAsState(initial = "High")
+    val glassOpacityPercent by preferences.glassOpacityPercentFlow.collectAsState(initial = 72)
+    val glassBlurRadiusDp by preferences.glassBlurRadiusDpFlow.collectAsState(initial = 22)
+    val autoPlayBluetooth by preferences.autoPlayBluetoothFlow.collectAsState(initial = true)
     val dynamicIslandEnabled by preferences.dynamicIslandEnabledFlow.collectAsState(initial = false)
     val islandCutoutMode by preferences.dynamicIslandCutoutModeFlow.collectAsState(initial = "Auto")
     var inAppIslandExpanded by remember { mutableStateOf(false) }
@@ -125,12 +129,32 @@ fun RezonaApp() {
         return
     }
 
-    val isLowEnd = remember { isLowEndDevice(context) }
-    val defaultIntensity = remember { if (isLowEnd) GlassIntensity.LOW else GlassIntensity.MEDIUM }
-    remember { GlassIntensity.current = defaultIntensity }
+    LaunchedEffect(glassIntensityPref, glassOpacityPercent, glassBlurRadiusDp) {
+        GlassIntensity.current = when (glassIntensityPref) {
+            "Low" -> GlassIntensity.LOW
+            "Medium" -> GlassIntensity.MEDIUM
+            else -> GlassIntensity.HIGH
+        }
+        GlassIntensity.customOpacityPercent = glassOpacityPercent.toFloat()
+        GlassIntensity.customBlurDp = glassBlurRadiusDp.toFloat()
+    }
 
     val hazeState = remember { HazeState() }
     val playerController = remember { RezonaPlayerController.getInstance(context.applicationContext) }
+
+    // Auto-Play when entering or inside the app with Bluetooth Speaker / Headset / Car Audio connected
+    val audioOutputInfo = com.nayama.music.playback.rememberAudioOutputInfo(context)
+    var lastAutoPlayedDevice by remember { mutableStateOf("") }
+    LaunchedEffect(audioOutputInfo.isExternalDevice, audioOutputInfo.label, autoPlayBluetooth) {
+        if (autoPlayBluetooth && audioOutputInfo.isExternalDevice) {
+            if (lastAutoPlayedDevice != audioOutputInfo.label) {
+                lastAutoPlayedDevice = audioOutputInfo.label
+                playerController.triggerExternalAudioAutoPlay(audioOutputInfo.label)
+            }
+        } else if (!audioOutputInfo.isExternalDevice) {
+            lastAutoPlayedDevice = ""
+        }
+    }
 
     var currentTab by remember { mutableStateOf(RezonaTab.Home) }
     var isNavFolded by remember { mutableStateOf(false) }

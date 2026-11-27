@@ -23,6 +23,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import java.net.HttpURLConnection
 import java.net.URL
@@ -132,15 +133,49 @@ class NayamaMediaService : Service() {
             }
         }
 
-        return START_NOT_STICKY
+        return START_STICKY
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
+        com.nayama.music.overlay.RezonaDynamicIslandService.setAppInForeground(false)
+        val keepAlive = runCatching {
+            kotlinx.coroutines.runBlocking {
+                com.nayama.music.data.preferences.RezonaPreferences(applicationContext)
+                    .keepAliveOnSwipeFlow.first()
+            }
+        }.getOrDefault(true)
+
+        val rc = RezonaPlayerController.getExistingInstance()
+        val activeTrack = rc?.currentTrack?.value
+        if (keepAlive && activeTrack != null) {
+            // Keep playback, notification, and Dynamic Island alive even after swiping Rezona from Recent Apps!
+            val art = if (activeTrack.coverArtUrl == cachedArtworkUrl) cachedArtworkBitmap else null
+            val notification = buildMediaNotification(
+                title = activeTrack.title,
+                artist = activeTrack.artist,
+                isPlaying = rc.isPlaying.value,
+                isLiked = rc.isLiked.value,
+                artworkBitmap = art
+            )
+            runCatching {
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
+                    startForeground(
+                        NayamaApplication.NOTIFICATION_ID,
+                        notification,
+                        ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+                    )
+                } else {
+                    startForeground(NayamaApplication.NOTIFICATION_ID, notification)
+                }
+            }
+            return
+        }
+
         runCatching {
             MusicPlayerController.getInstance(applicationContext).stopAndClearForTaskRemoval()
         }
         runCatching {
-            RezonaPlayerController.getExistingInstance()?.stopPlaybackOnTaskRemoval()
+            rc?.stopPlaybackOnTaskRemoval()
         }
         stopForegroundAndSelf()
         super.onTaskRemoved(rootIntent)

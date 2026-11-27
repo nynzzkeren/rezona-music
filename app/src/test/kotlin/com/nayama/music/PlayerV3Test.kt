@@ -283,5 +283,30 @@ class PlayerV3Test {
         val gtxJson = """[[["Aku merindukanmu\n","I miss you\n",null,null,10],["Malam ini","Tonight",null,null,10]],null,"en"]"""
         val translated = com.nayama.music.backend.LyricLanguageHelper.parseGtxTranslationJson(gtxJson)
         assertEquals("Aku merindukanmu\nMalam ini", translated)
+
+        // Spotify Public vs Private Playlist parsing & URL extraction
+        val spUrl = "https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M?si=abcd1234"
+        assertTrue(com.nayama.music.data.importer.RezonaImportExportManager.isSpotifyPlaylistUrl(spUrl))
+        assertEquals("37i9dQZF1DXcBWIGoYBM5M", com.nayama.music.data.importer.RezonaImportExportManager.extractSpotifyPlaylistId(spUrl))
+
+        val publicEmbedHtml = """
+            <html><body>
+            <script id="__NEXT_DATA__" type="application/json">
+            {"props":{"pageProps":{"state":{"data":{"entity":{"name":"Indo Hits 2026","trackList":[{"title":"Aku Yang Jatuh Cinta","subtitle":"Dudy Oris"},{"title":"Multo","subtitle":"Cup of Joe"}]}}}}}}
+            </script>
+            </body></html>
+        """.trimIndent()
+        val parsedPublic = com.nayama.music.data.importer.RezonaImportExportManager.parseSpotifyEmbedHtml(publicEmbedHtml)
+        assertTrue(parsedPublic.isPublic)
+        assertEquals("Indo Hits 2026", parsedPublic.title)
+        assertEquals(2, parsedPublic.tracks.size)
+        assertEquals("Aku Yang Jatuh Cinta" to "Dudy Oris", parsedPublic.tracks[0])
+
+        val privateEmbedHtml = """<html><body>Page not found · This playlist is private</body></html>"""
+        val parsedPrivate = com.nayama.music.data.importer.RezonaImportExportManager.parseSpotifyEmbedHtml(privateEmbedHtml)
+        assertFalse(parsedPrivate.isPublic)
+        assertTrue(parsedPrivate.tracks.isEmpty())
+
+        assertEquals("07:05", com.nayama.music.playback.RezonaMusicAlarmManager.formatAlarmTime(7, 5))
     }
 }

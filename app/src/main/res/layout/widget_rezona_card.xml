@@ -60,6 +60,24 @@
             android:textSize="13sp"
             android:maxLines="1"
             android:ellipsize="end" />
+
+        <TextView
+            android:id="@+id/widget_lyric_line"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_below="@id/widget_artist"
+            android:layout_marginTop="5dp"
+            android:background="@drawable/rezona_widget_pill_bg"
+            android:paddingStart="10dp"
+            android:paddingEnd="10dp"
+            android:paddingTop="4dp"
+            android:paddingBottom="4dp"
+            android:text="♪ Synced lyrics ready"
+            android:textColor="#F2FFFFFF"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:maxLines="1"
+            android:ellipsize="end" />
     </RelativeLayout>
 
     <ProgressBar

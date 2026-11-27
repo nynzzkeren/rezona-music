@@ -64,10 +64,20 @@ object RezonaWidgetUpdater {
         val durMs = controller?.durationMs?.longValue ?: 0L
         val progress = if (durMs > 0L) ((posMs * 1000L) / durMs).toInt().coerceIn(0, 1000) else 0
         val artUrl = track?.coverArtUrl.orEmpty()
+        val lyrics = controller?.currentLyrics?.value.orEmpty()
+        val activeLyric = if (lyrics.isNotEmpty()) {
+            val idx = lyrics.indexOfLast { it.timeMs <= posMs + 180L }
+            (if (idx >= 0) lyrics.getOrNull(idx)?.text else lyrics.firstOrNull()?.text)?.takeIf { it.isNotBlank() }
+        } else null
+        val lyricText = when {
+            !activeLyric.isNullOrBlank() -> "♪ $activeLyric"
+            track != null -> "♪ ${track.artist} — ${track.title}"
+            else -> "♪ Open Rezona to start music"
+        }
         val streakText = "♪ ${cachedPlayCount.coerceAtLeast(if (track != null) 1 else 0)}"
 
         val initialBmp = if (artUrl.isNotBlank() && artUrl == cachedArtUrl) cachedArtBitmap else null
-        pushRemoteViews(appCtx, manager, cardIds, compactIds, title, artist, streakText, isPlaying, isLiked, progress, initialBmp)
+        pushRemoteViews(appCtx, manager, cardIds, compactIds, title, artist, lyricText, streakText, isPlaying, isLiked, progress, initialBmp)
 
         scope.launch {
             val totalPlays = runCatching {
@@ -83,7 +93,7 @@ object RezonaWidgetUpdater {
             if (totalPlays != cachedPlayCount || needsArt) {
                 cachedPlayCount = totalPlays
                 val updatedStreak = "♪ ${totalPlays.coerceAtLeast(if (track != null) 1 else 0)}"
-                pushRemoteViews(appCtx, manager, cardIds, compactIds, title, artist, updatedStreak, isPlaying, isLiked, progress, bmp)
+                pushRemoteViews(appCtx, manager, cardIds, compactIds, title, artist, lyricText, updatedStreak, isPlaying, isLiked, progress, bmp)
             }
         }
     }
@@ -98,6 +108,7 @@ object RezonaWidgetUpdater {
         compactIds: IntArray,
         title: String,
         artist: String,
+        lyricText: String,
         streakText: String,
         isPlaying: Boolean,
         isLiked: Boolean,
@@ -129,6 +140,7 @@ object RezonaWidgetUpdater {
             val rv = RemoteViews(context.packageName, R.layout.widget_rezona_card)
             rv.setTextViewText(R.id.widget_title, title)
             rv.setTextViewText(R.id.widget_artist, artist)
+            rv.setTextViewText(R.id.widget_lyric_line, lyricText)
             rv.setTextViewText(R.id.widget_streak_badge, streakText)
             rv.setProgressBar(R.id.widget_progress, 1000, progress, false)
             rv.setImageViewResource(R.id.widget_btn_play, playIcon)
@@ -152,7 +164,10 @@ object RezonaWidgetUpdater {
         for (id in compactIds) {
             val rv = RemoteViews(context.packageName, R.layout.widget_rezona_compact)
             rv.setTextViewText(R.id.widget_compact_title, title)
-            rv.setTextViewText(R.id.widget_compact_artist, artist)
+            rv.setTextViewText(
+                R.id.widget_compact_artist,
+                if (isPlaying && lyricText.startsWith("♪ ") && lyricText != "♪ Open Rezona to start music") lyricText else artist
+            )
             rv.setImageViewResource(R.id.widget_compact_play, playIcon)
             rv.setImageViewResource(R.id.widget_compact_like, likeIcon)
             rv.setInt(R.id.widget_compact_like, "setColorFilter", likeTint)

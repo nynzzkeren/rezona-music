@@ -108,9 +108,9 @@ fun OSplashScreen(
         }
     }
 
-    // Safety fallback: if video stalls or takes longer than 5.5s, proceed automatically
+    // Safety fallback: if video stalls or takes longer than 6.5s, proceed automatically
     LaunchedEffect(Unit) {
-        delay(5500)
+        delay(6500)
         finishSplash()
     }
 
@@ -136,7 +136,7 @@ fun OSplashScreen(
                         ViewGroup.LayoutParams.MATCH_PARENT
                     )
                     useController = false
-                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_ZOOM
+                    resizeMode = AspectRatioFrameLayout.RESIZE_MODE_FIT
                     setBackgroundColor(android.graphics.Color.BLACK)
                     setShutterBackgroundColor(android.graphics.Color.BLACK)
                     player = exoPlayer

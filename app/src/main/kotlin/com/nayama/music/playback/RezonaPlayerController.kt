@@ -624,6 +624,57 @@ class RezonaPlayerController(
         playTrack(target, queueTitle = queueTitle, autoQueueRadio = false)
     }
 
+    /**
+     * Builds and plays a Smart Playlist combining the user's Liked Songs and Most Frequently Played tracks.
+     */
+    fun playSmartPlaylist(customToast: String? = null) {
+        val repo = libraryRepo ?: return
+        scope.launch(Dispatchers.IO) {
+            val liked = runCatching { repo.getLikedTracks().first().map { it.toRezonaTrack() } }.getOrDefault(emptyList())
+            val mostPlayed = runCatching { repo.getMostPlayed(40).first().map { it.toRezonaTrack() } }.getOrDefault(emptyList())
+            val recent = runCatching {
+                context?.let {
+                    RezonaDatabase.getInstance(it).historyDao().getRecentHistory(30).first().map { e -> e.toRezonaTrack() }
+                }.orEmpty()
+            }.getOrDefault(emptyList())
+
+            val interleaved = mutableListOf<RezonaTrack>()
+            val maxLen = maxOf(liked.size, mostPlayed.size)
+            for (i in 0 until maxLen) {
+                if (i < liked.size) interleaved.add(liked[i])
+                if (i < mostPlayed.size) interleaved.add(mostPlayed[i])
+            }
+            val smartTracks = (interleaved + recent)
+                .distinctBy { it.id }
+                .ifEmpty { com.nayama.music.ui.home.REAL_POPULAR_SEEDS }
+
+            withContext(Dispatchers.Main) {
+                if (smartTracks.isNotEmpty()) {
+                    playQueue(smartTracks, startIndex = 0, queueTitle = "Smart Mix · Liked & Most Played")
+                    val msg = customToast ?: "Smart Playlist: ${smartTracks.size} liked & most played tracks"
+                    context?.let { Toast.makeText(it, msg, Toast.LENGTH_SHORT).show() }
+                }
+            }
+        }
+    }
+
+    /**
+     * Automatically starts or resumes music when entering the app with a Bluetooth speaker,
+     * headset, or car audio connected.
+     */
+    fun triggerExternalAudioAutoPlay(deviceLabel: String) {
+        if (isPlaying.value) return
+        val active = currentTrack.value
+        if (active != null) {
+            togglePlayPause()
+            context?.let {
+                Toast.makeText(it, "Auto-resumed on $deviceLabel", Toast.LENGTH_SHORT).show()
+            }
+        } else {
+            playSmartPlaylist(customToast = "Auto-playing Smart Mix on $deviceLabel")
+        }
+    }
+
     fun refreshLyrics(forceReload: Boolean = true) {
         val track = currentTrack.value ?: return
         val source = selectedLyricsSource.value

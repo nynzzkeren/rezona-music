@@ -73,7 +73,14 @@ fun RezonaSettingsScreen(
     val crossfade by preferences.crossfadeSecondsFlow.collectAsState(initial = 4)
     val gapless by preferences.gaplessFlow.collectAsState(initial = true)
     val scrubberStyle by preferences.scrubberStyleFlow.collectAsState(initial = "Line")
-    val glassIntensity by preferences.glassIntensityFlow.collectAsState(initial = "Low")
+    val glassIntensity by preferences.glassIntensityFlow.collectAsState(initial = "High")
+    val glassOpacityPercent by preferences.glassOpacityPercentFlow.collectAsState(initial = 72)
+    val glassBlurRadiusDp by preferences.glassBlurRadiusDpFlow.collectAsState(initial = 22)
+    val autoPlayBluetooth by preferences.autoPlayBluetoothFlow.collectAsState(initial = true)
+    val keepAliveOnSwipe by preferences.keepAliveOnSwipeFlow.collectAsState(initial = true)
+    val alarmEnabled by preferences.musicAlarmEnabledFlow.collectAsState(initial = false)
+    val alarmHour by preferences.musicAlarmHourFlow.collectAsState(initial = 7)
+    val alarmMinute by preferences.musicAlarmMinuteFlow.collectAsState(initial = 0)
     val vividAmbient by preferences.ambientVividPlayerFlow.collectAsState(initial = true)
     val dockFoldOnScroll by preferences.dockFoldOnScrollFlow.collectAsState(initial = true)
     val dynamicIslandEnabled by preferences.dynamicIslandEnabledFlow.collectAsState(initial = false)
@@ -267,6 +274,99 @@ fun RezonaSettingsScreen(
                         checked = videoHqWifiOnly,
                         onCheckedChange = { coroutineScope.launch { preferences.setVideoHqWifiOnly(it) } }
                     )
+                    SettingsToggleRow(
+                        title = "Auto-Play on Bluetooth / Headset / Car",
+                        subtitle = "Automatically play music when opening Rezona with Bluetooth speaker, headset, or car audio connected",
+                        checked = autoPlayBluetooth,
+                        onCheckedChange = { coroutineScope.launch { preferences.setAutoPlayBluetooth(it) } }
+                    )
+                    SettingsToggleRow(
+                        title = "Keep Music Alive When Swiped from Recents",
+                        subtitle = "Continue playing music & Dynamic Island in background even after clearing Rezona from phone tabs",
+                        checked = keepAliveOnSwipe,
+                        onCheckedChange = { coroutineScope.launch { preferences.setKeepAliveOnSwipe(it) } }
+                    )
+
+                    Spacer(modifier = Modifier.height(10.dp))
+                    RezonaHairlineDivider()
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    // Music Alarm (In-App + System Clock App support on all devices)
+                    SettingsToggleRow(
+                        title = "Music Alarm (${com.nayama.music.playback.RezonaMusicAlarmManager.formatAlarmTime(alarmHour, alarmMinute)})",
+                        subtitle = "Wake up to your Smart Playlist (Liked & Most Played) or export to device Clock app",
+                        checked = alarmEnabled,
+                        onCheckedChange = { enabled ->
+                            coroutineScope.launch {
+                                preferences.setMusicAlarm(enabled, alarmHour, alarmMinute)
+                                if (enabled) {
+                                    com.nayama.music.playback.RezonaMusicAlarmManager.scheduleInAppMusicAlarm(context, alarmHour, alarmMinute)
+                                    Toast.makeText(
+                                        context,
+                                        "Music Alarm set for ${com.nayama.music.playback.RezonaMusicAlarmManager.formatAlarmTime(alarmHour, alarmMinute)}",
+                                        Toast.LENGTH_SHORT
+                                    ).show()
+                                } else {
+                                    com.nayama.music.playback.RezonaMusicAlarmManager.cancelInAppMusicAlarm(context)
+                                    Toast.makeText(context, "Music Alarm turned off", Toast.LENGTH_SHORT).show()
+                                }
+                            }
+                        }
+                    )
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Alarm Hour", style = Typography.bodyMedium, color = PearlWhite)
+                        Text(String.format(Locale.ENGLISH, "%02d:00", alarmHour), style = Typography.bodyMedium.copy(fontWeight = FontWeight.Bold), color = PureWhite)
+                    }
+                    RezonaGlassSlider(
+                        value = alarmHour.toFloat(),
+                        onValueChange = { h ->
+                            val newH = h.roundToInt().coerceIn(0, 23)
+                            coroutineScope.launch {
+                                preferences.setMusicAlarm(alarmEnabled, newH, alarmMinute)
+                                if (alarmEnabled) {
+                                    com.nayama.music.playback.RezonaMusicAlarmManager.scheduleInAppMusicAlarm(context, newH, alarmMinute)
+                                }
+                            }
+                        },
+                        valueRange = 0f..23f,
+                        formatBubble = { String.format(Locale.ENGLISH, "%02dh", it.roundToInt()) }
+                    )
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Text("Alarm Minute", style = Typography.bodyMedium, color = PearlWhite)
+                        Text(String.format(Locale.ENGLISH, ":%02d", alarmMinute), style = Typography.bodyMedium.copy(fontWeight = FontWeight.Bold), color = PureWhite)
+                    }
+                    RezonaGlassSlider(
+                        value = alarmMinute.toFloat(),
+                        onValueChange = { m ->
+                            val newM = m.roundToInt().coerceIn(0, 59)
+                            coroutineScope.launch {
+                                preferences.setMusicAlarm(alarmEnabled, alarmHour, newM)
+                                if (alarmEnabled) {
+                                    com.nayama.music.playback.RezonaMusicAlarmManager.scheduleInAppMusicAlarm(context, alarmHour, newM)
+                                }
+                            }
+                        },
+                        valueRange = 0f..59f,
+                        formatBubble = { String.format(Locale.ENGLISH, "%02dm", it.roundToInt()) }
+                    )
+                    Spacer(modifier = Modifier.height(6.dp))
+                    RezonaGlassButton(
+                        text = "Sync with Phone Alarm App (${com.nayama.music.playback.RezonaMusicAlarmManager.formatAlarmTime(alarmHour, alarmMinute)})",
+                        isPrimary = false,
+                        onClick = {
+                            coroutineScope.launch {
+                                preferences.setMusicAlarm(true, alarmHour, alarmMinute)
+                                com.nayama.music.playback.RezonaMusicAlarmManager.openSystemAlarmApp(
+                                    context = context,
+                                    hour = alarmHour,
+                                    minute = alarmMinute,
+                                    label = "Rezona Music Alarm · Smart Playlist"
+                                )
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    Spacer(modifier = Modifier.height(10.dp))
                     RezonaHairlineDivider()
                 }
             }
@@ -275,18 +375,31 @@ fun RezonaSettingsScreen(
             item(key = "sec_appearance") {
                 Column(modifier = Modifier.fillMaxWidth()) {
                     SettingsSectionHeader("APPEARANCE")
-                    Text("Liquid Glass Intensity", style = Typography.titleMedium, color = PearlWhite)
-                    Text("Real Haze blur on floating surfaces (Low uses gradient scrims)", style = Typography.bodySmall, color = SmokySilver)
+                    Text("Liquid Glass Preset", style = Typography.titleMedium, color = PearlWhite)
+                    Text("Adjust frosted glass visibility, specular rim & live backdrop blur", style = Typography.bodySmall, color = SmokySilver)
                     Spacer(modifier = Modifier.height(8.dp))
                     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                        listOf("Low", "High").forEach { intensity ->
+                        listOf("Low", "Medium", "High").forEach { intensity ->
                             val isSelected = glassIntensity == intensity
                             RezonaGlassPill(
                                 isActive = isSelected,
                                 onClick = {
                                     coroutineScope.launch {
                                         preferences.setGlassIntensity(intensity)
-                                        GlassIntensity.current = if (intensity == "High") GlassIntensity.HIGH else GlassIntensity.LOW
+                                        when (intensity) {
+                                            "Low" -> {
+                                                GlassIntensity.current = GlassIntensity.LOW
+                                                preferences.setGlassBlurRadiusDp(8)
+                                            }
+                                            "Medium" -> {
+                                                GlassIntensity.current = GlassIntensity.MEDIUM
+                                                preferences.setGlassBlurRadiusDp(18)
+                                            }
+                                            else -> {
+                                                GlassIntensity.current = GlassIntensity.HIGH
+                                                preferences.setGlassBlurRadiusDp(26)
+                                            }
+                                        }
                                     }
                                 },
                                 modifier = Modifier.weight(1f)
@@ -295,6 +408,44 @@ fun RezonaSettingsScreen(
                             }
                         }
                     }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Column {
+                            Text("Glass Frost & Rim Visibility", style = Typography.titleMedium, color = PearlWhite)
+                            Text("Make Liquid Glass sheen & borders more prominent", style = Typography.bodySmall, color = SmokySilver)
+                        }
+                        Text("$glassOpacityPercent%", style = Typography.titleMedium.copy(fontWeight = FontWeight.Bold), color = PureWhite)
+                    }
+                    RezonaGlassSlider(
+                        value = glassOpacityPercent.toFloat(),
+                        onValueChange = {
+                            val pct = it.roundToInt().coerceIn(25, 100)
+                            GlassIntensity.customOpacityPercent = pct.toFloat()
+                            coroutineScope.launch { preferences.setGlassOpacityPercent(pct) }
+                        },
+                        valueRange = 25f..100f,
+                        formatBubble = { "${it.roundToInt()}%" }
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                        Column {
+                            Text("Glass Backdrop Blur", style = Typography.titleMedium, color = PearlWhite)
+                            Text("Control frosted blur strength behind glass cards", style = Typography.bodySmall, color = SmokySilver)
+                        }
+                        Text("${glassBlurRadiusDp}dp", style = Typography.titleMedium.copy(fontWeight = FontWeight.Bold), color = PureWhite)
+                    }
+                    RezonaGlassSlider(
+                        value = glassBlurRadiusDp.toFloat(),
+                        onValueChange = {
+                            val dpVal = it.roundToInt().coerceIn(0, 40)
+                            GlassIntensity.customBlurDp = dpVal.toFloat()
+                            coroutineScope.launch { preferences.setGlassBlurRadiusDp(dpVal) }
+                        },
+                        valueRange = 0f..40f,
+                        formatBubble = { "${it.roundToInt()}dp" }
+                    )
                     Spacer(modifier = Modifier.height(10.dp))
                     SettingsToggleRow(
                         title = "Vivid Ambient Player",

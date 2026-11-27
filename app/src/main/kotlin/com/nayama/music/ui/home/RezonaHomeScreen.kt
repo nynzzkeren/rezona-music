@@ -426,6 +426,29 @@ fun RezonaHomeScreen(
                         contentPadding = PaddingValues(horizontal = 20.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
+                        item(key = "freq_smart_mix") {
+                            RezonaGlassPill(
+                                isActive = true,
+                                onClick = { controller.playSmartPlaylist() }
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(5.dp)
+                                ) {
+                                    Icon(
+                                        painter = painterResource(id = R.drawable.ic_heart_filled),
+                                        contentDescription = null,
+                                        tint = Color(0xFFFF5A6E),
+                                        modifier = Modifier.size(13.dp)
+                                    )
+                                    Text(
+                                        text = "Smart Mix",
+                                        style = Typography.labelLarge.copy(fontSize = 12.5.sp, fontWeight = FontWeight.ExtraBold),
+                                        color = PureWhite
+                                    )
+                                }
+                            }
+                        }
                         item(key = "freq_all") {
                             val active = selectedMood == null
                             RezonaGlassPill(

@@ -43,10 +43,19 @@ class RezonaPreferences(private val context: Context) {
 
         // Appearance Settings
         val KEY_GLASS_INTENSITY = stringPreferencesKey("ui_glass_intensity")
+        val KEY_GLASS_OPACITY_PERCENT = intPreferencesKey("ui_glass_opacity_percent")
+        val KEY_GLASS_BLUR_RADIUS_DP = intPreferencesKey("ui_glass_blur_radius_dp")
         val KEY_AMBIENT_VIVID_PLAYER = booleanPreferencesKey("ui_ambient_vivid_player")
         val KEY_DOCK_FOLD_ON_SCROLL = booleanPreferencesKey("ui_dock_fold_on_scroll")
         val KEY_DYNAMIC_ISLAND_ENABLED = booleanPreferencesKey("ui_dynamic_island_enabled")
         val KEY_DYNAMIC_ISLAND_CUTOUT_MODE = stringPreferencesKey("ui_dynamic_island_cutout_mode")
+
+        // Smart Playback, Bluetooth Auto-Play, Background Keep-Alive & Music Alarm
+        val KEY_AUTO_PLAY_BLUETOOTH = booleanPreferencesKey("playback_auto_play_bluetooth")
+        val KEY_KEEP_ALIVE_ON_SWIPE = booleanPreferencesKey("playback_keep_alive_on_swipe")
+        val KEY_MUSIC_ALARM_ENABLED = booleanPreferencesKey("music_alarm_enabled")
+        val KEY_MUSIC_ALARM_HOUR = intPreferencesKey("music_alarm_hour")
+        val KEY_MUSIC_ALARM_MINUTE = intPreferencesKey("music_alarm_minute")
 
         // Lyrics & Translation Settings
         val KEY_LYRICS_TRANSLATION_ENABLED = booleanPreferencesKey("lyrics_translation_enabled")
@@ -197,7 +206,35 @@ class RezonaPreferences(private val context: Context) {
     }
 
     val glassIntensityFlow: Flow<String> = context.dataStore.data.map { prefs ->
-        prefs[KEY_GLASS_INTENSITY] ?: "Low"
+        prefs[KEY_GLASS_INTENSITY] ?: "High"
+    }
+
+    val glassOpacityPercentFlow: Flow<Int> = context.dataStore.data.map { prefs ->
+        (prefs[KEY_GLASS_OPACITY_PERCENT] ?: 72).coerceIn(25, 100)
+    }
+
+    val glassBlurRadiusDpFlow: Flow<Int> = context.dataStore.data.map { prefs ->
+        (prefs[KEY_GLASS_BLUR_RADIUS_DP] ?: 22).coerceIn(0, 40)
+    }
+
+    val autoPlayBluetoothFlow: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[KEY_AUTO_PLAY_BLUETOOTH] ?: true
+    }
+
+    val keepAliveOnSwipeFlow: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[KEY_KEEP_ALIVE_ON_SWIPE] ?: true
+    }
+
+    val musicAlarmEnabledFlow: Flow<Boolean> = context.dataStore.data.map { prefs ->
+        prefs[KEY_MUSIC_ALARM_ENABLED] ?: false
+    }
+
+    val musicAlarmHourFlow: Flow<Int> = context.dataStore.data.map { prefs ->
+        (prefs[KEY_MUSIC_ALARM_HOUR] ?: 7).coerceIn(0, 23)
+    }
+
+    val musicAlarmMinuteFlow: Flow<Int> = context.dataStore.data.map { prefs ->
+        (prefs[KEY_MUSIC_ALARM_MINUTE] ?: 0).coerceIn(0, 59)
     }
 
     val ambientVividPlayerFlow: Flow<Boolean> = context.dataStore.data.map { prefs ->
@@ -331,6 +368,30 @@ class RezonaPreferences(private val context: Context) {
     suspend fun setScrubberStyle(style: String) = editSyncedSetting { it[KEY_SCRUBBER_STYLE] = style }
 
     suspend fun setGlassIntensity(intensity: String) = editSyncedSetting { it[KEY_GLASS_INTENSITY] = intensity }
+
+    suspend fun setGlassOpacityPercent(percent: Int) = editSyncedSetting {
+        it[KEY_GLASS_OPACITY_PERCENT] = percent.coerceIn(25, 100)
+    }
+
+    suspend fun setGlassBlurRadiusDp(radiusDp: Int) = editSyncedSetting {
+        it[KEY_GLASS_BLUR_RADIUS_DP] = radiusDp.coerceIn(0, 40)
+    }
+
+    suspend fun setAutoPlayBluetooth(enabled: Boolean) = editSyncedSetting {
+        it[KEY_AUTO_PLAY_BLUETOOTH] = enabled
+    }
+
+    suspend fun setKeepAliveOnSwipe(enabled: Boolean) = editSyncedSetting {
+        it[KEY_KEEP_ALIVE_ON_SWIPE] = enabled
+    }
+
+    suspend fun setMusicAlarm(enabled: Boolean, hour: Int, minute: Int) {
+        context.dataStore.edit { prefs ->
+            prefs[KEY_MUSIC_ALARM_ENABLED] = enabled
+            prefs[KEY_MUSIC_ALARM_HOUR] = hour.coerceIn(0, 23)
+            prefs[KEY_MUSIC_ALARM_MINUTE] = minute.coerceIn(0, 59)
+        }
+    }
 
     suspend fun setAmbientVividPlayer(enabled: Boolean) = editSyncedSetting { it[KEY_AMBIENT_VIVID_PLAYER] = enabled }
 

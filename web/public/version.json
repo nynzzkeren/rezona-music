@@ -1,21 +1,19 @@
 ﻿{
-    "versionCode":  3,
-    "versionName":  "1.0.3",
-    "announcementId":  "rezona-v1.0.3-202611252045",
-    "title":  "Rezona Studio Prism \u0026 Dynamic Island Update",
+    "versionCode":  4,
+    "versionName":  "1.0.4",
+    "announcementId":  "rezona-v1.0.4-202611271414",
+    "title":  "Rezona V1.0.4 — Blurred Dynamic Island, Spotify Import \u0026 Smart Features",
     "apkUrl":  "https://rezona-music-web.vercel.app",
     "added":  [
-                  "Spatial Prism \u0026 Vinyl Studio UI Redesign",
-                  "Giant 120fps Spinning Vinyl Record in Now Playing",
-                  "In-app Update \u0026 Announcement system with Android System Notification"
+                  "Blurred cover-art Dynamic Island with smooth lyrics + translation, Voice Changer (Slowed/Lo-Fi), Love \u0026 Repeat",
+                  "Widget Lyrics, Music Alarm (supports all phone alarm apps), Spotify Public Playlist Importer, Smart Playlist \u0026 Bluetooth Auto-Play",
+                  "New Rezona \u0027R\u0027 icon \u0026 intro splash video animation"
               ],
     "fixed":  [
-                  "Dynamic Island anti-ketimpa kapsul bawaan HP",
-                  "Adsterra native banner layout on download web"
+                  "Music keeps playing in background even when Rezona tab is swiped away from Recent Apps"
               ],
     "improved":  [
-                     "Bigger 84% vinyl record platter with smooth 120fps continuous rotation \u0026 turntable inertia",
-                     "Smart Camera Cutout placement"
+                     "More prominent Liquid Glass frost \u0026 blur with live sliders in Settings"
                  ],
-    "changelog":  "1. Add :\n- Spatial Prism \u0026 Vinyl Studio UI Redesign\n- Giant 120fps Spinning Vinyl Record in Now Playing\n- In-app Update \u0026 Announcement system with Android System Notification\n\n2. Fix :\n- Dynamic Island anti-ketimpa kapsul bawaan HP\n- Adsterra native banner layout on download web\n\n3. Improved :\n- Bigger 84% vinyl record platter with smooth 120fps continuous rotation \u0026 turntable inertia\n- Smart Camera Cutout placement\n\nInstall ulang di : https://rezona-music-web.vercel.app"
+    "changelog":  "1. Add :\n- Blurred cover-art Dynamic Island with smooth lyrics + translation, Voice Changer (Slowed/Lo-Fi), Love \u0026 Repeat\n- Widget Lyrics, Music Alarm (supports all phone alarm apps), Spotify Public Playlist Importer, Smart Playlist \u0026 Bluetooth Auto-Play\n- New Rezona \u0027R\u0027 icon \u0026 intro splash video animation\n\n2. Fix :\n- Music keeps playing in background even when Rezona tab is swiped away from Recent Apps\n\n3. Improved :\n- More prominent Liquid Glass frost \u0026 blur with live sliders in Settings\n\nInstall ulang di : https://rezona-music-web.vercel.app"
 }

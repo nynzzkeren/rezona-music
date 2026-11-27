@@ -97,10 +97,13 @@ fun RezonaBackupSheet(
         val clip = clipboard.primaryClip
         if (clip != null && clip.itemCount > 0) {
             val text = clip.getItemAt(0).text?.toString()?.trim() ?: ""
-            if (RezonaImportExportManager.isYouTubeMusicPlaylistUrl(text)) {
+            if (RezonaImportExportManager.isYouTubeMusicPlaylistUrl(text) ||
+                RezonaImportExportManager.isSpotifyPlaylistUrl(text)
+            ) {
                 linkInput = text
                 showLinkDialog = true
-                snackbarHostState.showSnackbar("YouTube Music link detected from clipboard")
+                val kind = if (RezonaImportExportManager.isSpotifyPlaylistUrl(text)) "Spotify" else "YouTube Music"
+                snackbarHostState.showSnackbar("$kind playlist link detected from clipboard")
             }
         }
     }
@@ -233,7 +236,7 @@ fun RezonaBackupSheet(
 
             Spacer(modifier = Modifier.height(20.dp))
 
-            // Option 1: Import YouTube Music Link
+            // Option 1: Import Spotify Public Playlist or YouTube Music Link
             RezonaGlassCard(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -252,13 +255,13 @@ fun RezonaBackupSheet(
                         modifier = Modifier
                             .size(42.dp)
                             .clip(CircleShape)
-                            .background(Color(0xFFFF0000).copy(alpha = 0.2f)),
+                            .background(Color(0xFF1DB954).copy(alpha = 0.22f)),
                         contentAlignment = Alignment.Center
                     ) {
                         Icon(
-                            painter = painterResource(id = R.drawable.ic_rezona_search),
+                            painter = painterResource(id = R.drawable.ic_playlist_add),
                             contentDescription = null,
-                            tint = Color(0xFFFF4E4E),
+                            tint = Color(0xFF1ED760),
                             modifier = Modifier.size(20.dp)
                         )
                     }
@@ -266,8 +269,8 @@ fun RezonaBackupSheet(
                     Spacer(modifier = Modifier.width(14.dp))
 
                     Column(modifier = Modifier.weight(1f)) {
-                        Text(text = "Import YouTube Music playlist", style = Typography.titleMedium, color = PearlWhite)
-                        Text(text = "Paste a music.youtube.com/playlist link", style = Typography.bodySmall, color = SmokySilver)
+                        Text(text = "Import Spotify / YouTube Music Playlist", style = Typography.titleMedium, color = PearlWhite)
+                        Text(text = "Paste a PUBLIC open.spotify.com/playlist or music.youtube.com link", style = Typography.bodySmall, color = SmokySilver)
                     }
                 }
             }
@@ -397,32 +400,49 @@ fun RezonaBackupSheet(
     // Link Input Dialog
     if (showLinkDialog) {
         com.nayama.music.ui.components.RezonaGlassDialog(
-            title = "Import Playlist Link",
+            title = "Import Spotify / YTM Playlist",
             onDismissRequest = { showLinkDialog = false },
             confirmText = "Import",
             onConfirm = {
                 val url = linkInput.trim()
-                if (RezonaImportExportManager.isYouTubeMusicPlaylistUrl(url)) {
-                    showLinkDialog = false
-                    isReadingPlaylist = true
-                    scope.launch {
-                        try {
-                            val res = RezonaImportExportManager.importFromLink(url, repository)
-                            importResult = res
-                        } catch (e: Exception) {
-                            errorMessage = e.localizedMessage ?: "Failed to import link"
-                        } finally {
-                            isReadingPlaylist = false
+                when {
+                    RezonaImportExportManager.isSpotifyPlaylistUrl(url) -> {
+                        showLinkDialog = false
+                        isReadingPlaylist = true
+                        scope.launch {
+                            try {
+                                val res = RezonaImportExportManager.importSpotifyPublicPlaylist(context, url, repository)
+                                importResult = res
+                            } catch (e: Exception) {
+                                errorMessage = e.localizedMessage ?: "Failed to import Spotify playlist (must be Public)"
+                            } finally {
+                                isReadingPlaylist = false
+                            }
                         }
                     }
-                } else {
-                    errorMessage = "Please enter a valid YouTube Music playlist URL (e.g. music.youtube.com/playlist?list=...)"
+                    RezonaImportExportManager.isYouTubeMusicPlaylistUrl(url) -> {
+                        showLinkDialog = false
+                        isReadingPlaylist = true
+                        scope.launch {
+                            try {
+                                val res = RezonaImportExportManager.importFromLink(url, repository)
+                                importResult = res
+                            } catch (e: Exception) {
+                                errorMessage = e.localizedMessage ?: "Failed to import link"
+                            } finally {
+                                isReadingPlaylist = false
+                            }
+                        }
+                    }
+                    else -> {
+                        errorMessage = "Enter a valid PUBLIC Spotify playlist link (open.spotify.com/playlist/...) or YouTube Music playlist URL."
+                    }
                 }
             },
             dismissText = "Cancel"
         ) {
             Text(
-                text = "Paste a public YouTube Music playlist link. No account login required.",
+                text = "Paste a PUBLIC Spotify playlist link (Private Spotify playlists cannot be imported) or a YouTube Music playlist link.",
                 style = Typography.bodySmall,
                 color = SmokySilver
             )
@@ -430,7 +450,7 @@ fun RezonaBackupSheet(
             com.nayama.music.ui.components.RezonaGlassTextField(
                 value = linkInput,
                 onValueChange = { linkInput = it },
-                placeholder = "https://music.youtube.com/playlist?list=...",
+                placeholder = "https://open.spotify.com/playlist/...",
                 singleLine = true,
                 modifier = Modifier.fillMaxWidth()
             )

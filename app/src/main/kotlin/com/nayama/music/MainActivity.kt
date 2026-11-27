@@ -84,6 +84,11 @@ class MainActivity : ComponentActivity() {
         val prefs = getSharedPreferences("nayama_debug_prefs", Context.MODE_PRIVATE)
         val lastCrash = prefs.getString("last_crash_stacktrace", null)
 
+        if (intent?.getBooleanExtra(com.nayama.music.playback.RezonaMusicAlarmManager.ACTION_TRIGGER_MUSIC_ALARM, false) == true) {
+            com.nayama.music.playback.RezonaPlayerController.getInstance(applicationContext)
+                .playSmartPlaylist(customToast = "Rezona Music Alarm · Playing Smart Mix")
+        }
+
         setContent {
             RezonaTheme {
                 Surface(

@@ -334,6 +334,57 @@ fun RezonaLibraryScreen(
                             ),
                             verticalArrangement = Arrangement.spacedBy(16.dp)
                         ) {
+                            // Smart Playlist + Spotify Import + Music Alarm Banner
+                            item(key = "vault_smart_playlist_banner") {
+                                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                                    VinylTimeCapsuleCard(
+                                        title = "Smart Playlist · Liked & Top Spins",
+                                        subtitle = "Auto-mixes songs you love & play most frequently",
+                                        coverUrl = likedTracks.firstOrNull()?.coverArtUrl
+                                            ?: myTop50Tracks.firstOrNull()?.coverArtUrl.orEmpty(),
+                                        fallbackIndex = 2,
+                                        onClick = { controller.playSmartPlaylist() },
+                                        onPlayNow = { controller.playSmartPlaylist() }
+                                    )
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        RezonaGlassPill(
+                                            isActive = false,
+                                            onClick = { showBackupSheet = true },
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Text(
+                                                text = "Import Spotify Playlist",
+                                                style = Typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                                color = PureWhite,
+                                                maxLines = 1
+                                            )
+                                        }
+                                        RezonaGlassPill(
+                                            isActive = false,
+                                            onClick = {
+                                                com.nayama.music.playback.RezonaMusicAlarmManager.openSystemAlarmApp(
+                                                    context = context,
+                                                    hour = 7,
+                                                    minute = 0,
+                                                    label = "Rezona Music Alarm · Smart Playlist"
+                                                )
+                                            },
+                                            modifier = Modifier.weight(1f)
+                                        ) {
+                                            Text(
+                                                text = "Set Music Alarm",
+                                                style = Typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                                color = PearlWhite,
+                                                maxLines = 1
+                                            )
+                                        }
+                                    }
+                                }
+                            }
+
                             // 2x2 Asymmetric Vault Bento Tiles
                             item(key = "vault_bento_grid") {
                                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -688,7 +739,7 @@ fun RezonaLibraryScreen(
                     showFabMenuSheet = false
                     showCreatePlaylistDialog = true
                 }
-                VaultSheetOptionRow(iconRes = R.drawable.ic_playlist_add, title = "Import playlist (M3U, CSV, YouTube Music)") {
+                VaultSheetOptionRow(iconRes = R.drawable.ic_playlist_add, title = "Import Public Spotify / YTM / M3U / CSV Playlist") {
                     showFabMenuSheet = false
                     showBackupSheet = true
                 }

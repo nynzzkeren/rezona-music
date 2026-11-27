@@ -85,8 +85,8 @@ import dev.chrisbanes.haze.materials.HazeMaterials
 import kotlin.math.roundToInt
 
 /**
- * Tunable Glass Blur Intensity levels.
- * In LOW intensity, live blur is replaced with a translucent scrim gradient for 60fps on low-end phones.
+ * Tunable Glass Blur & Frost Visibility levels.
+ * Supports both preset selection (LOW / MEDIUM / HIGH) and live user-adjustable Opacity % and Blur Radius dp.
  */
 enum class GlassIntensity(val blurRadiusDp: Float, val label: String) {
     LOW(8f, "Low"),
@@ -94,7 +94,9 @@ enum class GlassIntensity(val blurRadiusDp: Float, val label: String) {
     HIGH(35f, "High");
 
     companion object {
-        var current: GlassIntensity = MEDIUM
+        var current by mutableStateOf(HIGH)
+        var customOpacityPercent by mutableFloatStateOf(72f)
+        var customBlurDp by mutableFloatStateOf(22f)
     }
 }
 
@@ -138,11 +140,17 @@ fun Modifier.rezonaHazeEffect(
     shape: Shape? = null
 ): Modifier {
     val supportsHardwareBlur = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
-    val useLiveBlur = supportsHardwareBlur && GlassIntensity.current != GlassIntensity.LOW
+    val blurDp = GlassIntensity.customBlurDp
+    val useLiveBlur = supportsHardwareBlur && GlassIntensity.current != GlassIntensity.LOW && blurDp >= 4f
+    val style = when {
+        blurDp >= 28f -> HazeMaterials.regular()
+        blurDp >= 16f -> HazeMaterials.thin()
+        else -> HazeMaterials.ultraThin()
+    }
     return if (hazeState != null && useLiveBlur) {
         this.hazeEffect(
             state = hazeState,
-            style = HazeMaterials.ultraThin()
+            style = style
         )
     } else {
         this
@@ -200,50 +208,63 @@ fun GlassSurface(
     )
 
     val supportsHardwareBlur = Build.VERSION.SDK_INT >= Build.VERSION_CODES.S
+    val blurDp = GlassIntensity.customBlurDp
+    val opacityScale = (GlassIntensity.customOpacityPercent / 60f).coerceIn(0.45f, 1.55f)
     val usesRealBlur = (variant == GlassSurfaceVariant.Floating ||
+        variant == GlassSurfaceVariant.Card ||
         variant == GlassSurfaceVariant.Dialog ||
         variant == GlassSurfaceVariant.Menu ||
         variant == GlassSurfaceVariant.Toast) &&
         supportsHardwareBlur &&
-        GlassIntensity.current != GlassIntensity.LOW
+        GlassIntensity.current != GlassIntensity.LOW &&
+        blurDp >= 4f
 
-    // Cover-tinted glass: ambientBase lightened 12-18% at 35-50% alpha + white specular rim (no black/purple boxes)
-    val topAlpha = when {
-        isPressed -> 0.54f
-        isActive -> 0.48f
-        isFocused -> 0.46f
-        variant == GlassSurfaceVariant.Floating || variant == GlassSurfaceVariant.Dialog -> 0.48f
-        variant == GlassSurfaceVariant.IconButton -> 0.44f
-        else -> 0.38f
-    }
-    val bottomAlpha = when {
-        isPressed -> 0.42f
-        isActive -> 0.36f
-        variant == GlassSurfaceVariant.Floating || variant == GlassSurfaceVariant.Dialog -> 0.38f
-        variant == GlassSurfaceVariant.IconButton -> 0.32f
-        else -> 0.28f
+    val hazeStyle = when {
+        blurDp >= 28f -> HazeMaterials.regular()
+        blurDp >= 16f -> HazeMaterials.thin()
+        else -> HazeMaterials.ultraThin()
     }
 
-    val tintedTop = lerp(tintedGlass, Color.White, 0.14f).copy(alpha = topAlpha)
-    val tintedBottom = lerp(tintedGlass, ambientAccent, 0.28f).copy(alpha = bottomAlpha)
-
-    // Specular rim: 1dp gradient border, white 35-45% at top fading to 5% at bottom
-    val rimTopAlpha = when {
-        isPressed -> 0.65f
-        isFocused -> 0.60f
+    // Cover-tinted refractive glass with prominent frosted white sheen + specular border
+    val baseTopAlpha = when {
+        isPressed -> 0.58f
         isActive -> 0.52f
-        else -> 0.40f
+        isFocused -> 0.50f
+        variant == GlassSurfaceVariant.Floating || variant == GlassSurfaceVariant.Dialog -> 0.52f
+        variant == GlassSurfaceVariant.IconButton -> 0.48f
+        else -> 0.44f
     }
-    val rimBottomAlpha = when {
-        isPressed -> 0.16f
-        isFocused -> 0.18f
-        isActive -> 0.12f
-        else -> 0.05f
+    val baseBottomAlpha = when {
+        isPressed -> 0.46f
+        isActive -> 0.40f
+        variant == GlassSurfaceVariant.Floating || variant == GlassSurfaceVariant.Dialog -> 0.42f
+        variant == GlassSurfaceVariant.IconButton -> 0.36f
+        else -> 0.32f
     }
+    val topAlpha = (baseTopAlpha * opacityScale).coerceIn(0.18f, 0.84f)
+    val bottomAlpha = (baseBottomAlpha * opacityScale).coerceIn(0.12f, 0.72f)
+
+    val whiteMix = (0.18f * opacityScale).coerceIn(0.12f, 0.34f)
+    val tintedTop = lerp(tintedGlass, Color.White, whiteMix).copy(alpha = topAlpha)
+    val tintedBottom = lerp(tintedGlass, ambientAccent, 0.26f).copy(alpha = bottomAlpha)
+
+    // Specular rim: crisp frost border, scaled by user glass visibility setting
+    val rimTopAlpha = (when {
+        isPressed -> 0.78f
+        isFocused -> 0.72f
+        isActive -> 0.64f
+        else -> 0.52f
+    } * opacityScale).coerceIn(0.24f, 0.92f)
+    val rimBottomAlpha = (when {
+        isPressed -> 0.24f
+        isFocused -> 0.24f
+        isActive -> 0.18f
+        else -> 0.11f
+    } * opacityScale).coerceIn(0.06f, 0.42f)
     val rimBrush = Brush.verticalGradient(
         colors = listOf(
             Color.White.copy(alpha = rimTopAlpha),
-            Color.White.copy(alpha = (rimTopAlpha + rimBottomAlpha) * 0.35f),
+            Color.White.copy(alpha = (rimTopAlpha + rimBottomAlpha) * 0.42f),
             Color.White.copy(alpha = rimBottomAlpha)
         )
     )
@@ -276,7 +297,7 @@ fun GlassSurface(
             .clip(shape)
             .then(
                 if (usesRealBlur && hazeState != null) {
-                    Modifier.hazeEffect(state = hazeState, style = HazeMaterials.ultraThin())
+                    Modifier.hazeEffect(state = hazeState, style = hazeStyle)
                 } else Modifier
             )
             .background(
@@ -286,22 +307,22 @@ fun GlassSurface(
             .drawWithContent {
                 drawContent()
                 // Thin inner highlight along top edge & subtle inner shadow along bottom edge
-                val strokePx = 1.dp.toPx()
+                val strokePx = 1.2.dp.toPx()
                 drawLine(
-                    color = Color.White.copy(alpha = if (isPressed) 0.28f else 0.16f),
-                    start = Offset(size.width * 0.08f, strokePx * 0.5f),
-                    end = Offset(size.width * 0.92f, strokePx * 0.5f),
+                    color = Color.White.copy(alpha = (if (isPressed) 0.36f else 0.24f) * opacityScale.coerceAtMost(1.3f)),
+                    start = Offset(size.width * 0.07f, strokePx * 0.5f),
+                    end = Offset(size.width * 0.93f, strokePx * 0.5f),
                     strokeWidth = strokePx
                 )
                 drawLine(
-                    color = Color.Black.copy(alpha = 0.22f),
-                    start = Offset(size.width * 0.08f, size.height - strokePx * 0.5f),
-                    end = Offset(size.width * 0.92f, size.height - strokePx * 0.5f),
+                    color = Color.Black.copy(alpha = 0.24f),
+                    start = Offset(size.width * 0.07f, size.height - strokePx * 0.5f),
+                    end = Offset(size.width * 0.93f, size.height - strokePx * 0.5f),
                     strokeWidth = strokePx
                 )
             }
             .border(
-                width = if (variant == GlassSurfaceVariant.Floating || isFocused) 1.25.dp else 1.dp,
+                width = if (variant == GlassSurfaceVariant.Floating || isFocused) 1.35.dp else 1.15.dp,
                 brush = rimBrush,
                 shape = shape
             )
