@@ -25,9 +25,9 @@ import kotlin.random.Random
  * Provides the active track's ambient cover color to all glass surfaces
  * so baked glass tints carry the cover color family (rezona_player_v3.md Part 1).
  */
-val LocalAmbientAccentColor = compositionLocalOf { Color(0xFF282F3A) }
-val LocalAmbientBaseColor = compositionLocalOf { Color(0xFF1A1E24) }
-val LocalTintedGlassColor = compositionLocalOf { Color(0x6B2E3540) }
+val LocalAmbientAccentColor = compositionLocalOf { Color(0xFF2C384E) }
+val LocalAmbientBaseColor = compositionLocalOf { Color(0xFF0E131D) }
+val LocalTintedGlassColor = compositionLocalOf { Color(0x6E2A3448) }
 
 /**
  * Fallback deterministic ambient colors when cover artwork has not loaded yet.
@@ -35,9 +35,9 @@ val LocalTintedGlassColor = compositionLocalOf { Color(0x6B2E3540) }
 fun deriveAmbientColors(track: RezonaTrack?): Triple<Color, Color, Color> {
     if (track == null) {
         return Triple(
-            Color(0xFF1D2430),
-            Color(0xFF161C26),
-            Color(0xFF12161E)
+            Color(0xFF182234),
+            Color(0xFF24334C),
+            Color(0xFF0E1420)
         )
     }
 

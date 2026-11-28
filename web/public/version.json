@@ -1,21 +1,19 @@
-﻿{
-    "versionCode": 5,
-    "versionName": "1.0.5",
-    "announcementId": "rezona-v1.0.5-202611282032",
-    "title": "Rezona Major Update — Live 3D Video Poster, 24+ SuperLab & Windows PC Release",
+{
+    "versionCode": 6,
+    "versionName": "1.0.6",
+    "announcementId": "rezona-v1.0.6-202611282241",
+    "title": "Rezona Update — New Rezona Icon, Sliding Glass Lens Navbar & Poster Watermark",
     "apkUrl": "https://rezona-music-web.vercel.app",
     "added": [
-        "Live 3D Floating Song & Video Poster (.MP4) + Mode Di Belakang Foto (Auto-Cutout) + Bebas Geser Kartu & Foto",
-        "Studio Video Lirik & Kartu Pemutar iOS (1:1, 4:5, 9:16, 16:9 + Share Cepat Status WA & IG)",
-        "iOS Control Center Pull-Down Grid (Pilar Volume Vertikal 0-100% + 12 Tombol Studio Cepat)",
-        "Studio Chord Gitar & Ukulele Real-Time (Easy Capo, C-Key, Original + Diagram Jari & Transpose)",
-        "24+ Fitur SuperLab: AI Karaoke Vocal Remover, 432Hz/528Hz Solfeggio, Binaural Brainwaves, A-B Loop, BPM Tapper, Kenali Lagu & Sync Windows PC"
+        "Fitur Geser Navbar (Home, Search, Library, You) dengan Efek Lensa Kaca (Sliding Liquid Glass Lens) yang meluncur mulus mengikuti jari",
+        "Watermark Logo Rezona terbaru di semua Poster Lirik, Kartu Pemutar iOS, 3D Song Poster, & Share Song Card",
+        "Aplikasi Rezona Windows (.EXE) kini berdesain persis seperti tampilan aplikasi HP Rezona"
     ],
     "fixed": [
-        "Fixed tombol transport (< || >) yang keluar dari batas bawah kartu di 3D Song Poster"
+        "Fixed icon/cover lagu di Poster Lirik yang kadang tidak muncul (dilengkapi 3-layer loader + fallback)"
     ],
     "improved": [
-        "Rombak Total Web Download Rezona + Rilis Resmi Rezona for Windows Desktop (.EXE & Web Desktop)"
+        "Ganti Icon APK & Web ke Logo Rezona terbaru + Tema Warna Baru (Platinum Frost & Deep Sapphire Liquid Glass)"
     ],
-    "changelog": "1. Add :\n- Live 3D Floating Song & Video Poster (.MP4) + Mode Di Belakang Foto (Auto-Cutout) + Bebas Geser Kartu & Foto\n- Studio Video Lirik & Kartu Pemutar iOS (1:1, 4:5, 9:16, 16:9 + Share Cepat Status WA & IG)\n- iOS Control Center Pull-Down Grid + Studio Chord Gitar (Easy Capo & Diagram Jari)\n- 24+ Fitur SuperLab (AI Karaoke, 432Hz/528Hz, Binaural Brainwaves, A-B Loop, BPM Tapper, Kenali Lagu, Sync Windows PC)\n\n2. Fix :\n- Fixed tombol transport yang keluar dari kartu di 3D Song Poster\n\n3. Improved :\n- Web Download Baru + Rilis Rezona for Windows Desktop (.EXE)\n\nInstall ulang di : https://rezona-music-web.vercel.app"
+    "changelog": "1. Add :\n- Fitur Geser Navbar (Home, Search, Library, You) dengan Efek Lensa Kaca (Sliding Liquid Glass Lens)\n- Watermark Logo Rezona terbaru di semua Poster Lirik, Kartu iOS, & 3D Song Poster\n- Aplikasi Rezona Windows (.EXE) kini berdesain persis seperti aplikasi HP Rezona\n\n2. Fix :\n- Fixed icon/cover lagu di Poster Lirik yang kadang tidak muncul\n\n3. Improved :\n- Ganti Icon APK & Web ke Logo Rezona terbaru + Tema Warna Platinum Frost & Deep Sapphire\n\nInstall ulang di : https://rezona-music-web.vercel.app"
 }

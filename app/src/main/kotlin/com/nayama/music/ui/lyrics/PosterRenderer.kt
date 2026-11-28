@@ -4,6 +4,7 @@ import android.content.ContentValues
 import android.content.Context
 import android.content.Intent
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.LinearGradient
@@ -24,9 +25,17 @@ import android.text.Layout
 import android.text.StaticLayout
 import android.text.TextPaint
 import androidx.core.content.FileProvider
+import androidx.core.graphics.drawable.toBitmap
+import coil.imageLoader
+import coil.request.ImageRequest
+import coil.request.SuccessResult
+import com.nayama.music.R
+import com.nayama.music.model.RezonaTrack
 import com.nayama.music.ui.util.MOCK_PALETTES
 import java.io.File
 import java.io.FileOutputStream
+import java.net.HttpURLConnection
+import java.net.URL
 
 enum class PosterFormat(val width: Int, val height: Int, val label: String) {
     SQUARE(1080, 1080, "1:1"),
@@ -56,6 +65,145 @@ enum class PosterFont(val label: String) {
 }
 
 object PosterRenderer {
+
+    @Volatile
+    private var cachedRezonaLogo: Bitmap? = null
+
+    fun getRezonaLogoBitmap(context: Context): Bitmap? {
+        cachedRezonaLogo?.let { if (!it.isRecycled) return it }
+        return runCatching {
+            BitmapFactory.decodeResource(context.resources, R.drawable.ic_rezona_logo)?.also {
+                cachedRezonaLogo = it
+            }
+        }.getOrNull()
+    }
+
+    /**
+     * Reliably loads a track's cover art bitmap using:
+     * 1. Coil disk/memory cache & loader
+     * 2. YouTube fallback thumbnail URL (`https://i.ytimg.com/vi/<id>/hqdefault.jpg`) if coverArtUrl is blank
+     * 3. Direct HttpURLConnection with browser User-Agent
+     * 4. Styled Rezona R logo fallback so the song icon NEVER renders as an empty box!
+     */
+    suspend fun loadTrackCoverBitmap(context: Context, track: RezonaTrack): Bitmap? {
+        val ytId = track.id.removePrefix("yt_").takeIf { it.length in 8..16 && !it.contains(" ") }
+        val candidates = buildList {
+            if (track.coverArtUrl.isNotBlank()) add(track.coverArtUrl)
+            if (ytId != null) {
+                add("https://i.ytimg.com/vi/$ytId/hqdefault.jpg")
+                add("https://i.ytimg.com/vi/$ytId/mqdefault.jpg")
+            }
+        }.distinct()
+
+        for (url in candidates) {
+            val fromCoil = runCatching {
+                val req = ImageRequest.Builder(context)
+                    .data(url)
+                    .allowHardware(false)
+                    .size(480, 480)
+                    .build()
+                val res = context.imageLoader.execute(req)
+                (res as? SuccessResult)?.drawable?.toBitmap(480, 480, Bitmap.Config.ARGB_8888)
+            }.getOrNull()
+            if (fromCoil != null) return fromCoil
+
+            val fromHttp = runCatching {
+                val conn = (URL(url).openConnection() as HttpURLConnection).apply {
+                    connectTimeout = 5000
+                    readTimeout = 5000
+                    instanceFollowRedirects = true
+                    setRequestProperty("User-Agent", "Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 Chrome/124.0")
+                }
+                conn.inputStream.use { BitmapFactory.decodeStream(it) }
+            }.getOrNull()
+            if (fromHttp != null) return fromHttp
+        }
+        return getRezonaLogoBitmap(context)
+    }
+
+    /**
+     * Draws a sleek rounded Rezona watermark badge featuring the official new Rezona R icon + text.
+     */
+    fun drawRezonaBrandWatermark(
+        context: Context,
+        canvas: Canvas,
+        centerX: Float,
+        centerY: Float,
+        pillHeight: Float,
+        label: String = "Rezona"
+    ) {
+        val textPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.WHITE
+            textSize = pillHeight * 0.46f
+            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
+            letterSpacing = 0.04f
+        }
+        val textW = textPaint.measureText(label)
+        val iconSize = pillHeight * 0.68f
+        val gap = pillHeight * 0.22f
+        val padH = pillHeight * 0.42f
+        val pillW = padH * 2f + iconSize + gap + textW
+
+        val rect = RectF(
+            centerX - pillW * 0.5f,
+            centerY - pillHeight * 0.5f,
+            centerX + pillW * 0.5f,
+            centerY + pillHeight * 0.5f
+        )
+
+        val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            color = Color.argb(145, 14, 18, 26)
+        }
+        val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            style = Paint.Style.STROKE
+            strokeWidth = 1.8f
+            color = Color.argb(110, 255, 255, 255)
+        }
+        canvas.drawRoundRect(rect, pillHeight * 0.5f, pillHeight * 0.5f, bgPaint)
+        canvas.drawRoundRect(rect, pillHeight * 0.5f, pillHeight * 0.5f, borderPaint)
+
+        // Draw new Rezona R logo icon inside circular/rounded badge
+        val iconLeft = rect.left + padH
+        val iconTop = centerY - iconSize * 0.5f
+        val iconRect = RectF(iconLeft, iconTop, iconLeft + iconSize, iconTop + iconSize)
+        val logoBmp = getRezonaLogoBitmap(context)
+        if (logoBmp != null && !logoBmp.isRecycled) {
+            val save = canvas.save()
+            val clip = Path().apply { addRoundRect(iconRect, iconSize * 0.26f, iconSize * 0.26f, Path.Direction.CW) }
+            canvas.clipPath(clip)
+            canvas.drawBitmap(logoBmp, null, iconRect, Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
+            canvas.restoreToCount(save)
+        }
+
+        val textX = iconRect.right + gap
+        val textY = centerY - (textPaint.descent() + textPaint.ascent()) * 0.5f
+        canvas.drawText(label, textX, textY, textPaint)
+    }
+
+    /**
+     * Draws a track cover thumbnail into [thumbRect]; if [coverArtBitmap] is null, draws the Rezona logo artwork
+     * so the song icon is ALWAYS visible.
+     */
+    private fun drawCoverOrFallbackLogo(
+        context: Context,
+        canvas: Canvas,
+        thumbRect: RectF,
+        cornerRadius: Float,
+        coverArtBitmap: Bitmap?,
+        cPrimary: Int
+    ) {
+        val bmp = coverArtBitmap?.takeIf { !it.isRecycled } ?: getRezonaLogoBitmap(context)
+        if (bmp != null && !bmp.isRecycled) {
+            val save = canvas.save()
+            val path = Path().apply { addRoundRect(thumbRect, cornerRadius, cornerRadius, Path.Direction.CW) }
+            canvas.clipPath(path)
+            canvas.drawBitmap(bmp, null, thumbRect, Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
+            canvas.restoreToCount(save)
+        } else {
+            val tp = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = cPrimary }
+            canvas.drawRoundRect(thumbRect, cornerRadius, cornerRadius, tp)
+        }
+    }
 
     fun renderPosterBitmap(
         context: Context,
@@ -147,6 +295,7 @@ object PosterRenderer {
         // 3. Branch by Style Mode: PLAYER_CARD ("Kartu Pemutar" iOS Control Center Card) vs FOCUS / LYRICS
         if (styleMode == PosterStyleMode.PLAYER_CARD) {
             drawIosPlayerCardPoster(
+                context = context,
                 canvas = canvas,
                 width = width,
                 height = height,
@@ -169,19 +318,14 @@ object PosterRenderer {
         if (showThumbnail) {
             val thumbSize = if (height < 900) 96f else 126f
             val thumbRect = RectF(contentPadding, currentY, contentPadding + thumbSize, currentY + thumbSize)
-            if (coverArtBitmap != null && !coverArtBitmap.isRecycled) {
-                val save = canvas.save()
-                val path = Path().apply { addRoundRect(thumbRect, 24f, 24f, Path.Direction.CW) }
-                canvas.clipPath(path)
-                canvas.drawBitmap(coverArtBitmap, null, thumbRect, Paint(Paint.FILTER_BITMAP_FLAG))
-                canvas.restoreToCount(save)
-            } else {
-                val thumbPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                    color = cPrimary
-                    style = Paint.Style.FILL
-                }
-                canvas.drawRoundRect(thumbRect, 24f, 24f, thumbPaint)
-            }
+            drawCoverOrFallbackLogo(
+                context = context,
+                canvas = canvas,
+                thumbRect = thumbRect,
+                cornerRadius = 24f,
+                coverArtBitmap = coverArtBitmap,
+                cPrimary = cPrimary
+            )
 
             val metaPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
                 color = Color.parseColor("#F4F5F7")
@@ -249,33 +393,25 @@ object PosterRenderer {
             lineY += layout.height + (if (height < 900) 24f else 36f)
         }
 
-        // 5. Watermark & Brand Footer
+        // 5. Watermark & Brand Footer with Official New Rezona R Logo
         if (showWatermark) {
-            val footerPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.parseColor("#8E96A4")
-                textSize = 26f
-                letterSpacing = 0.14f
-                this.typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
-            }
-            val footerY = height - (if (height < 900) 48f else 84f)
-            val offsetTag = if (kotlin.math.abs(timingOffsetSec) >= 0.05f) {
-                " · SYNC ${String.format("%+.1fs", timingOffsetSec)}"
-            } else ""
-            canvas.drawText("◉ REZONA · PURE RESONANCE$offsetTag", contentPadding, footerY, footerPaint)
+            val pillH = if (height < 900) 44f else 54f
+            val footerCenterY = height - (if (height < 900) 52f else 84f)
+            drawRezonaBrandWatermark(
+                context = context,
+                canvas = canvas,
+                centerX = width * 0.5f,
+                centerY = footerCenterY,
+                pillHeight = pillH,
+                label = "Rezona"
+            )
         }
 
         return bitmap
     }
 
-    /**
-     * Renders the iOS Control Center Glass Player Card style ("Kartu Pemutar")
-     * matching Video 1 (00:33):
-     * - Frosted rounded glass card centered on the canvas
-     * - Top row: Album cover thumbnail + Title & Artist + Animated EQ bars on right
-     * - Middle: Karaoke word-by-word highlighted lyrics inside the card
-     * - Bottom: Progress bar with timestamps + `◀◀   ||   ▶▶` transport + Volume slider + `◉ Rezona` capsule
-     */
     private fun drawIosPlayerCardPoster(
+        context: Context,
         canvas: Canvas,
         width: Int,
         height: Int,
@@ -329,16 +465,14 @@ object PosterRenderer {
         // Header Row: Cover Art + Title/Artist + Mini Waveform Bars
         val thumbSize = cardW * 0.15f
         val thumbRect = RectF(cardRect.left + pad, curY, cardRect.left + pad + thumbSize, curY + thumbSize)
-        if (coverArtBitmap != null && !coverArtBitmap.isRecycled) {
-            val save = canvas.save()
-            val path = Path().apply { addRoundRect(thumbRect, 22f, 22f, Path.Direction.CW) }
-            canvas.clipPath(path)
-            canvas.drawBitmap(coverArtBitmap, null, thumbRect, Paint(Paint.FILTER_BITMAP_FLAG))
-            canvas.restoreToCount(save)
-        } else {
-            val tp = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = cPrimary }
-            canvas.drawRoundRect(thumbRect, 22f, 22f, tp)
-        }
+        drawCoverOrFallbackLogo(
+            context = context,
+            canvas = canvas,
+            thumbRect = thumbRect,
+            cornerRadius = 22f,
+            coverArtBitmap = coverArtBitmap,
+            cPrimary = cPrimary
+        )
 
         val titlePaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
             color = Color.WHITE
@@ -480,23 +614,18 @@ object PosterRenderer {
         canvas.drawLine(barLeft + 26f, volY, barRight - 26f, volY, trackPaint)
         canvas.drawLine(barLeft + 26f, volY, barLeft + (barRight - barLeft) * 0.72f, volY, activeBarPaint)
 
-        // Bottom `◉ Rezona` Pill inside Card
+        // Bottom Official Rezona R Logo Watermark Pill inside Card
         if (showWatermark) {
-            val pillW = cardW * 0.25f
-            val pillH = cardH * 0.048f
-            val pillTop = cardRect.bottom - pad * 0.82f - pillH
-            val pillRect = RectF(cx - pillW * 0.5f, pillTop, cx + pillW * 0.5f, pillTop + pillH)
-            val pillPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.argb(48, 255, 255, 255)
-            }
-            canvas.drawRoundRect(pillRect, pillH * 0.5f, pillH * 0.5f, pillPaint)
-            val brandPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-                color = Color.WHITE
-                textSize = cardW * 0.028f
-                textAlign = Paint.Align.CENTER
-                this.typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
-            }
-            canvas.drawText("◉ Rezona", cx, pillRect.centerY() + cardW * 0.01f, brandPaint)
+            val pillH = cardH * 0.052f
+            val pillCenterY = cardRect.bottom - pad * 0.80f - pillH * 0.5f
+            drawRezonaBrandWatermark(
+                context = context,
+                canvas = canvas,
+                centerX = cx,
+                centerY = pillCenterY,
+                pillHeight = pillH,
+                label = "Rezona"
+            )
         }
     }
 

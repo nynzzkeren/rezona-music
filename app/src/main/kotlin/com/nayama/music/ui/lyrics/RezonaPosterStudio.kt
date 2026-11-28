@@ -124,17 +124,9 @@ fun RezonaPosterStudio(
     var isExportingVideo by remember { mutableStateOf(false) }
     var coverBitmap by remember { mutableStateOf<Bitmap?>(null) }
 
-    LaunchedEffect(track.coverArtUrl) {
-        if (track.coverArtUrl.isNotBlank()) {
-            coverBitmap = withContext(Dispatchers.IO) {
-                runCatching {
-                    val conn = (URL(track.coverArtUrl).openConnection() as HttpURLConnection).apply {
-                        connectTimeout = 5000
-                        readTimeout = 5000
-                    }
-                    conn.inputStream.use { BitmapFactory.decodeStream(it) }
-                }.getOrNull()
-            }
+    LaunchedEffect(track.id, track.coverArtUrl) {
+        coverBitmap = withContext(Dispatchers.IO) {
+            PosterRenderer.loadTrackCoverBitmap(context, track)
         }
     }
 

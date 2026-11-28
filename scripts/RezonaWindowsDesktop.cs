@@ -163,7 +163,7 @@ namespace RezonaDesktop
                         Process.Start(new ProcessStartInfo
                         {
                             FileName = exe,
-                            Arguments = "--app=\"" + targetUrl + "\" --window-size=1360,860",
+                            Arguments = "--app=\"" + targetUrl + "\" --window-size=440,880",
                             UseShellExecute = false
                         });
                         return true;

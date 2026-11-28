@@ -31,8 +31,8 @@ object RezonaSongCardRenderer {
 
     suspend fun shareSongCard(context: Context, track: RezonaTrack) {
         val file = withContext(Dispatchers.IO) {
-            val coverBmp = downloadBitmap(track.coverArtUrl)
-            val cardBmp = renderCardBitmap(track, coverBmp)
+            val coverBmp = com.nayama.music.ui.lyrics.PosterRenderer.loadTrackCoverBitmap(context, track)
+            val cardBmp = renderCardBitmap(context, track, coverBmp)
             val outDir = File(context.cacheDir, "shared_cards").apply { if (!exists()) mkdirs() }
             val outFile = File(outDir, "rezona_card_${track.id.take(12)}.png")
             FileOutputStream(outFile).use { fos ->
@@ -65,7 +65,7 @@ object RezonaSongCardRenderer {
         }.getOrNull()
     }
 
-    private fun renderCardBitmap(track: RezonaTrack, coverBitmap: Bitmap?): Bitmap {
+    private fun renderCardBitmap(context: Context, track: RezonaTrack, coverBitmap: Bitmap?): Bitmap {
         val w = 1080
         val h = 1350
         val bmp = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
@@ -157,14 +157,15 @@ object RezonaSongCardRenderer {
             artistPaint
         )
 
-        // Brand Footer
-        val brandPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = Color.parseColor("#88FFFFFF")
-            textSize = 28f
-            letterSpacing = 0.14f
-            typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
-        }
-        canvas.drawText("REZONA · LIQUID GLASS AUDIO", artLeft, cardRect.bottom - 52f, brandPaint)
+        // Brand Footer with Official Rezona R Logo Watermark
+        com.nayama.music.ui.lyrics.PosterRenderer.drawRezonaBrandWatermark(
+            context = context,
+            canvas = canvas,
+            centerX = w * 0.5f,
+            centerY = cardRect.bottom - 56f,
+            pillHeight = 52f,
+            label = "Rezona"
+        )
 
         return bmp
     }

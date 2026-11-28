@@ -262,23 +262,20 @@ fun RezonaFloatingSongPosterStudio(
         }
     }
 
+    val logoBitmap = remember { PosterRenderer.getRezonaLogoBitmap(context) }
+
     LaunchedEffect(floatingTracks.toList()) {
         for (track in floatingTracks) {
-            val url = track.coverArtUrl
-            if (url.isNotBlank() && !coverBitmaps.containsKey(url)) {
+            val key = track.coverArtUrl.ifBlank { track.id }
+            if (!coverBitmaps.containsKey(key)) {
                 val bmp = withContext(Dispatchers.IO) {
-                    runCatching {
-                        val req = ImageRequest.Builder(context)
-                            .data(url)
-                            .allowHardware(false)
-                            .size(360, 360)
-                            .build()
-                        val res = context.imageLoader.execute(req)
-                        (res as? SuccessResult)?.drawable?.toBitmap(360, 360, Bitmap.Config.ARGB_8888)
-                    }.getOrNull()
+                    PosterRenderer.loadTrackCoverBitmap(context, track)
                 }
                 if (bmp != null) {
-                    coverBitmaps[url] = bmp
+                    coverBitmaps[key] = bmp
+                    if (track.coverArtUrl.isNotBlank()) {
+                        coverBitmaps[track.coverArtUrl] = bmp
+                    }
                     renderTrigger++
                 }
             }
@@ -347,7 +344,8 @@ fun RezonaFloatingSongPosterStudio(
                 cardOffsetsY = offY,
                 animPhaseRad = phase,
                 tracks = tracksSnapshot,
-                coverBitmaps = coversSnapshot
+                coverBitmaps = coversSnapshot,
+                logoBitmap = logoBitmap
             )
         }
         previewBitmap = rendered
@@ -929,7 +927,8 @@ object FloatingSongPosterRenderer {
         cardOffsetsY: Map<Int, Float> = emptyMap(),
         animPhaseRad: Float = 0f,
         tracks: List<RezonaTrack>,
-        coverBitmaps: Map<String, Bitmap>
+        coverBitmaps: Map<String, Bitmap>,
+        logoBitmap: Bitmap? = null
     ): Bitmap {
         val out = Bitmap.createBitmap(width, height, Bitmap.Config.ARGB_8888)
         val canvas = Canvas(out)
@@ -990,7 +989,7 @@ object FloatingSongPosterRenderer {
                 cardW = (cardBaseW * 0.62f).toInt().coerceAtLeast(100),
                 cardH = (cardBaseH * 0.62f).toInt().coerceAtLeast(125),
                 track = track,
-                coverBmp = coverBitmaps[track.coverArtUrl],
+                coverBmp = coverBitmaps[track.coverArtUrl] ?: coverBitmaps[track.id] ?: logoBitmap,
                 theme = theme,
                 animPhaseRad = animPhaseRad,
                 isBlurredMini = true
@@ -1024,7 +1023,7 @@ object FloatingSongPosterRenderer {
                 cardW = cardBaseW.toInt().coerceAtLeast(160),
                 cardH = cardBaseH.toInt().coerceAtLeast(200),
                 track = track,
-                coverBmp = coverBitmaps[track.coverArtUrl],
+                coverBmp = coverBitmaps[track.coverArtUrl] ?: coverBitmaps[track.id] ?: logoBitmap,
                 theme = theme,
                 animPhaseRad = animPhaseRad,
                 isBlurredMini = false
@@ -1047,8 +1046,8 @@ object FloatingSongPosterRenderer {
             )
         }
 
-        // 5. Bottom subtle Rezona watermark pill (like Video 3 bottom center badge)
-        drawRezonaWatermarkPill(canvas, width, height)
+        // 5. Bottom subtle Rezona watermark pill with Official New Rezona R Logo
+        drawRezonaWatermarkPill(canvas, width, height, logoBitmap)
 
         return out
     }
@@ -1354,31 +1353,48 @@ object FloatingSongPosterRenderer {
         fgLayer.recycle()
     }
 
-    private fun drawRezonaWatermarkPill(canvas: Canvas, width: Int, height: Int) {
-        val pillW = width * 0.28f
-        val pillH = height * 0.036f
+    private fun drawRezonaWatermarkPill(canvas: Canvas, width: Int, height: Int, logoBitmap: Bitmap? = null) {
+        val pillW = width * 0.30f
+        val pillH = height * 0.038f
         val left = (width - pillW) / 2f
         val top = height * 0.89f
         val rect = RectF(left, top, left + pillW, top + pillH)
         val bgPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = 0x8814161D.toInt()
+            color = 0xAA0E121A.toInt()
         }
         val borderPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
             style = Paint.Style.STROKE
-            strokeWidth = 1.5f
-            color = 0x55FFFFFF
+            strokeWidth = 1.6f
+            color = 0x66FFFFFF
         }
         canvas.drawRoundRect(rect, pillH / 2f, pillH / 2f, bgPaint)
         canvas.drawRoundRect(rect, pillH / 2f, pillH / 2f, borderPaint)
 
+        val iconSize = pillH * 0.68f
         val textPaint = TextPaint(Paint.ANTI_ALIAS_FLAG).apply {
-            color = 0xEEFFFFFF.toInt()
-            textSize = pillH * 0.50f
+            color = 0xFFFFFFFF.toInt()
+            textSize = pillH * 0.48f
             typeface = Typeface.create(Typeface.SANS_SERIF, Typeface.BOLD)
-            textAlign = Paint.Align.CENTER
         }
+        val label = "Rezona"
+        val textW = textPaint.measureText(label)
+        val gap = pillH * 0.22f
+        val totalContentW = iconSize + gap + textW
+        val startX = rect.centerX() - totalContentW / 2f
+
+        if (logoBitmap != null && !logoBitmap.isRecycled) {
+            val iconTop = rect.centerY() - iconSize / 2f
+            val iconRect = RectF(startX, iconTop, startX + iconSize, iconTop + iconSize)
+            val roundedLogo = getRoundedBitmap(logoBitmap, iconSize.toInt().coerceAtLeast(16), iconSize * 0.26f)
+            canvas.drawBitmap(roundedLogo, startX, iconTop, null)
+            roundedLogo.recycle()
+        } else {
+            val dotPaint = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = 0xFFFFFFFF.toInt() }
+            canvas.drawCircle(startX + iconSize * 0.5f, rect.centerY(), iconSize * 0.35f, dotPaint)
+        }
+
         val textY = rect.centerY() - (textPaint.descent() + textPaint.ascent()) / 2f
-        canvas.drawText("◉ Rezona", rect.centerX(), textY, textPaint)
+        canvas.drawText(label, startX + iconSize + gap, textY, textPaint)
     }
 
     /**
@@ -1476,7 +1492,8 @@ object FloatingSongPosterRenderer {
                     cardOffsetsY = cardOffsetsY,
                     animPhaseRad = phase,
                     tracks = tracks,
-                    coverBitmaps = coverBitmaps
+                    coverBitmaps = coverBitmaps,
+                    logoBitmap = PosterRenderer.getRezonaLogoBitmap(context)
                 )
                 val surfaceCanvas = inputSurface.lockCanvas(null)
                 surfaceCanvas.drawBitmap(frameBmp, 0f, 0f, null)
