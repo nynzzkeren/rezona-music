@@ -1,6 +1,5 @@
 using System;
 using System.Diagnostics;
-using System.Drawing;
 using System.IO;
 using System.Windows.Forms;
 
@@ -16,13 +15,15 @@ namespace RezonaDesktop
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
 
-            // Try launching in native App Window mode via Microsoft Edge / Chrome WebView2 shell first
+            // Auto-start NUSA Dynamic Island for Windows (github.com/rama2555/nusa) if installed on this PC
+            TryAutoStartNusaDynamicIsland();
+
+            // Launch Rezona Windows Studio in native App Window mode
             if (TryLaunchNativeAppWindow())
             {
                 return;
             }
 
-            // Fallback: open in default browser
             try
             {
                 Process.Start(new ProcessStartInfo
@@ -37,9 +38,47 @@ namespace RezonaDesktop
             }
         }
 
+        private static void TryAutoStartNusaDynamicIsland()
+        {
+            try
+            {
+                if (Process.GetProcessesByName("nusa").Length > 0)
+                {
+                    return; // Already running
+                }
+
+                string localAppData = Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData);
+                string progFiles = Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles);
+                string baseDir = AppDomain.CurrentDomain.BaseDirectory;
+
+                string[] nusaCandidates = new string[]
+                {
+                    Path.Combine(baseDir, "nusa.exe"),
+                    Path.Combine(localAppData, @"Programs\nusa\nusa.exe"),
+                    Path.Combine(localAppData, @"Nusa\nusa.exe"),
+                    Path.Combine(progFiles, @"Nusa\nusa.exe")
+                };
+
+                foreach (string candidate in nusaCandidates)
+                {
+                    if (File.Exists(candidate))
+                    {
+                        Process.Start(new ProcessStartInfo
+                        {
+                            FileName = candidate,
+                            UseShellExecute = true
+                        });
+                        break;
+                    }
+                }
+            }
+            catch
+            {
+            }
+        }
+
         private static bool TryLaunchNativeAppWindow()
         {
-            // Check if local desktop.html exists next to the executable for instant offline/local launch
             string localHtml = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "web", "public", "desktop.html");
             string targetUrl = File.Exists(localHtml) ? new Uri(localHtml).AbsoluteUri : DesktopUrl;
 

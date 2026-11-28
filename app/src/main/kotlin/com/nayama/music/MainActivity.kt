@@ -131,10 +131,9 @@ class MainActivity : ComponentActivity() {
         lifecycleScope.launch {
             val prefs = RezonaPreferences(applicationContext)
             val islandEnabled = prefs.dynamicIslandEnabledFlow.first()
-            val iosSideEnabled = prefs.iosSidePlayerEnabledFlow.first()
-            if ((islandEnabled || iosSideEnabled) && Settings.canDrawOverlays(this@MainActivity)) {
+            if (islandEnabled && Settings.canDrawOverlays(this@MainActivity)) {
                 RezonaDynamicIslandService.start(applicationContext)
-            } else if (!islandEnabled && !iosSideEnabled) {
+            } else if (!islandEnabled) {
                 RezonaDynamicIslandService.stop(applicationContext)
             }
         }

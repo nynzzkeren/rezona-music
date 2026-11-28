@@ -95,7 +95,6 @@ fun RezonaTrackMenuSheet(
     val downloadMgr = remember { OfflineDownloadManager.getInstance(context) }
     val preferences = remember { com.nayama.music.data.preferences.RezonaPreferences(context) }
     val dynamicIslandEnabled by preferences.dynamicIslandEnabledFlow.collectAsState(initial = false)
-    val iosSidePlayerEnabled by preferences.iosSidePlayerEnabledFlow.collectAsState(initial = false)
 
     val isLiked by libraryRepo.isLiked(track.id).collectAsState(initial = false)
     val isPinned by libraryRepo.isPinnedSpeedDial(track.id).collectAsState(initial = false)
@@ -268,37 +267,8 @@ fun RezonaTrackMenuSheet(
                                     com.nayama.music.overlay.OverlayPermissionHelper.openOverlayPermissionSettings(context)
                                 }
                             } else {
-                                if (!iosSidePlayerEnabled) {
-                                    com.nayama.music.overlay.RezonaDynamicIslandService.stop(context)
-                                }
+                                com.nayama.music.overlay.RezonaDynamicIslandService.stop(context)
                                 Toast.makeText(context, "Dynamic Island OFF", Toast.LENGTH_SHORT).show()
-                            }
-                        }
-                    },
-                    modifier = Modifier.weight(1f)
-                )
-                MenuGlassTile(
-                    iconRes = R.drawable.ic_music_note,
-                    label = if (iosSidePlayerEnabled) "iOS Side: ON" else "iOS Background",
-                    onClick = {
-                        val next = !iosSidePlayerEnabled
-                        scope.launch {
-                            preferences.setIosSidePlayerEnabled(next)
-                            val granted = com.nayama.music.overlay.OverlayPermissionHelper.canDrawOverlays(context)
-                            if (next) {
-                                if (granted) {
-                                    com.nayama.music.overlay.RezonaDynamicIslandService.start(context)
-                                }
-                                Toast.makeText(
-                                    context,
-                                    "iOS Background Side Player ON · Tap ♫ on right screen edge",
-                                    Toast.LENGTH_SHORT
-                                ).show()
-                            } else {
-                                if (!dynamicIslandEnabled) {
-                                    com.nayama.music.overlay.RezonaDynamicIslandService.stop(context)
-                                }
-                                Toast.makeText(context, "iOS Background Side Player OFF", Toast.LENGTH_SHORT).show()
                             }
                         }
                     },

@@ -346,16 +346,17 @@
             <span class="win-badge">v3.6 SuperLab · Desktop</span>
         </div>
 
-        <!-- Live Dynamic Island on Desktop -->
-        <div class="desktop-island">
+        <!-- Live Dynamic Island on Desktop (Integrated with NUSA Windows Dynamic Island via SMTC MediaSession) -->
+        <div class="desktop-island" title="Terhubung otomatis ke NUSA Dynamic Island Windows (SMTC)">
             <div class="island-eq"><span></span><span></span><span></span></div>
             <div style="font-size:12.5px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;" id="islandTitle">
                 About You — The 1975
             </div>
-            <span style="font-size:10.5px;color:var(--cyan);font-weight:800;" id="islandDspTag">Liquid Glass</span>
+            <span style="font-size:10.5px;color:var(--cyan);font-weight:800;" id="islandDspTag">NUSA Island Ready</span>
         </div>
 
         <div style="display:flex;gap:8px;align-items:center;">
+            <a href="https://github.com/rama2555/nusa/releases" target="_blank" rel="noopener noreferrer" class="btn-pill" style="text-decoration:none;border-color:rgba(112,214,255,0.5);color:var(--cyan);" title="Pasang NUSA Dynamic Island for Windows (GitHub)">🏝️ Get NUSA Dynamic Island (GitHub)</a>
             <button class="btn-pill" id="syncPhoneBtn">📱 Sync HP (Kode Pairing)</button>
             <a href="/" class="btn-pill" style="text-decoration:none;">🌐 Web Utama</a>
         </div>
@@ -614,6 +615,35 @@
                         audio.play().catch(() => {});
                         document.getElementById('playPauseBtn').textContent = '⏸';
                     }
+                }
+
+                // Expose full metadata + transport handlers to Windows SMTC so NUSA Dynamic Island on Windows
+                // automatically displays the cover art, song title, artist, and synced controls in the top notch!
+                if ('mediaSession' in navigator) {
+                    try {
+                        navigator.mediaSession.metadata = new MediaMetadata({
+                            title: t.title,
+                            artist: t.artist,
+                            album: t.album || 'Rezona Windows Studio',
+                            artwork: [
+                                { src: t.cover || (window.location.origin + '/logo.png'), sizes: '512x512', type: 'image/jpeg' }
+                            ]
+                        });
+                        navigator.mediaSession.setActionHandler('play', () => {
+                            audio.play().catch(() => {});
+                            document.getElementById('playPauseBtn').textContent = '⏸';
+                        });
+                        navigator.mediaSession.setActionHandler('pause', () => {
+                            audio.pause();
+                            document.getElementById('playPauseBtn').textContent = '▶';
+                        });
+                        navigator.mediaSession.setActionHandler('previoustrack', () => {
+                            if (tracks.length) selectTrack((currentIdx - 1 + tracks.length) % tracks.length, true);
+                        });
+                        navigator.mediaSession.setActionHandler('nexttrack', () => {
+                            if (tracks.length) selectTrack((currentIdx + 1) % tracks.length, true);
+                        });
+                    } catch (_) {}
                 }
             }
 
@@ -940,3 +970,4 @@
     </script>
 </body>
 </html>
+
