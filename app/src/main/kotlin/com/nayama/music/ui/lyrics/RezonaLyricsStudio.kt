@@ -268,7 +268,16 @@ fun RezonaInlineLyricsSection(
                 )
             }
 
-            RezonaActionDisc(size = 48.dp, onClick = onCollapseToCover) {
+            RezonaActionDisc(size = 44.dp, onClick = onOpenPosterFromShare) {
+                Icon(
+                    painter = painterResource(id = R.drawable.ic_share),
+                    contentDescription = "Share Lyrics Video & iOS Card",
+                    tint = PearlWhite,
+                    modifier = Modifier.size(18.dp)
+                )
+            }
+            Spacer(modifier = Modifier.width(6.dp))
+            RezonaActionDisc(size = 44.dp, onClick = onCollapseToCover) {
                 Icon(
                     painter = painterResource(id = R.drawable.ic_ambient),
                     contentDescription = "Back to Cover View",
@@ -277,7 +286,7 @@ fun RezonaInlineLyricsSection(
                 )
             }
             Spacer(modifier = Modifier.width(6.dp))
-            RezonaActionDisc(size = 48.dp, onClick = { showOptionsSheet = true }) {
+            RezonaActionDisc(size = 44.dp, onClick = { showOptionsSheet = true }) {
                 Icon(
                     painter = painterResource(id = R.drawable.ic_more_vert),
                     contentDescription = "Lyrics Options",

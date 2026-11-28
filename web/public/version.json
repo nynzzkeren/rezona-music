@@ -1,19 +1,21 @@
 ﻿{
-    "versionCode":  4,
-    "versionName":  "1.0.4",
-    "announcementId":  "rezona-v1.0.4-202611271844",
-    "title":  "Rezona Update — 3D Floating Song Poster Studio \u0026 Ultra-Light 120fps",
-    "apkUrl":  "https://rezona-music-web.vercel.app",
-    "added":  [
-                  "3D Floating Song Poster Studio (6 3D layouts, upload your own photo \u0026 search any song for floating cards)",
-                  "Dynamic Island, iOS Background \u0026 3D Song Poster moved cleanly into Now Playing 3-dot menu"
-              ],
-    "fixed":  [
-                  "Eliminated scroll \u0026 background lag (zero per-card GPU blur shader, zero 500ms widget polling)"
-              ],
-    "improved":  [
-                     "Now Playing restored to sleek Large Crystal Cover Art Banner",
-                     "Upgraded Split-Deck Widget Lyrics \u0026 iOS Background Side Player"
-                 ],
-    "changelog":  "1. Add :\n- 3D Floating Song Poster Studio (6 3D layouts, upload your own photo \u0026 search any song for floating cards)\n- Dynamic Island, iOS Background \u0026 3D Song Poster moved cleanly into Now Playing 3-dot menu\n\n2. Fix :\n- Eliminated scroll \u0026 background lag (zero per-card GPU blur shader, zero 500ms widget polling)\n\n3. Improved :\n- Now Playing restored to sleek Large Crystal Cover Art Banner\n- Upgraded Split-Deck Widget Lyrics \u0026 iOS Background Side Player\n\nInstall ulang di : https://rezona-music-web.vercel.app"
+    "versionCode": 5,
+    "versionName": "1.0.5",
+    "announcementId": "rezona-v1.0.5-202611282032",
+    "title": "Rezona Major Update — Live 3D Video Poster, 24+ SuperLab & Windows PC Release",
+    "apkUrl": "https://rezona-music-web.vercel.app",
+    "added": [
+        "Live 3D Floating Song & Video Poster (.MP4) + Mode Di Belakang Foto (Auto-Cutout) + Bebas Geser Kartu & Foto",
+        "Studio Video Lirik & Kartu Pemutar iOS (1:1, 4:5, 9:16, 16:9 + Share Cepat Status WA & IG)",
+        "iOS Control Center Pull-Down Grid (Pilar Volume Vertikal 0-100% + 12 Tombol Studio Cepat)",
+        "Studio Chord Gitar & Ukulele Real-Time (Easy Capo, C-Key, Original + Diagram Jari & Transpose)",
+        "24+ Fitur SuperLab: AI Karaoke Vocal Remover, 432Hz/528Hz Solfeggio, Binaural Brainwaves, A-B Loop, BPM Tapper, Kenali Lagu & Sync Windows PC"
+    ],
+    "fixed": [
+        "Fixed tombol transport (< || >) yang keluar dari batas bawah kartu di 3D Song Poster"
+    ],
+    "improved": [
+        "Rombak Total Web Download Rezona + Rilis Resmi Rezona for Windows Desktop (.EXE & Web Desktop)"
+    ],
+    "changelog": "1. Add :\n- Live 3D Floating Song & Video Poster (.MP4) + Mode Di Belakang Foto (Auto-Cutout) + Bebas Geser Kartu & Foto\n- Studio Video Lirik & Kartu Pemutar iOS (1:1, 4:5, 9:16, 16:9 + Share Cepat Status WA & IG)\n- iOS Control Center Pull-Down Grid + Studio Chord Gitar (Easy Capo & Diagram Jari)\n- 24+ Fitur SuperLab (AI Karaoke, 432Hz/528Hz, Binaural Brainwaves, A-B Loop, BPM Tapper, Kenali Lagu, Sync Windows PC)\n\n2. Fix :\n- Fixed tombol transport yang keluar dari kartu di 3D Song Poster\n\n3. Improved :\n- Web Download Baru + Rilis Rezona for Windows Desktop (.EXE)\n\nInstall ulang di : https://rezona-music-web.vercel.app"
 }

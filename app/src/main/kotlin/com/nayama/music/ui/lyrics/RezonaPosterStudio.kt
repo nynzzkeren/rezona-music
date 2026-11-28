@@ -1,12 +1,18 @@
 package com.nayama.music.ui.lyrics
 
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.widget.Toast
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -29,15 +35,16 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
-import androidx.compose.material3.ripple
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
-import com.nayama.music.data.preferences.RezonaPreferences
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -52,6 +59,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.nayama.music.R
+import com.nayama.music.data.preferences.RezonaPreferences
 import com.nayama.music.model.RezonaTrack
 import com.nayama.music.ui.components.RezonaGlassCard
 import com.nayama.music.ui.components.RezonaGlassPill
@@ -62,16 +70,19 @@ import com.nayama.music.ui.theme.SoftSilver
 import com.nayama.music.ui.theme.SpecularCardBorder
 import com.nayama.music.ui.theme.SpecularDockBorder
 import com.nayama.music.ui.theme.Typography
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
+import java.net.HttpURLConnection
+import java.net.URL
 
 /**
- * Full-Screen Poster Studio Sheet
- * Live 1080px Canvas rendering with full customization:
- * - Line selection (max 8)
- * - Background: Glass / Solid / Blur / Gradient
- * - Format: 1:1 Square / 9:16 Story
- * - Font: Editorial / Grotesk / Rounded / Serif (Bold / Regular)
- * - Alignment & Toggles (Cover thumbnail, Watermark)
- * - Save to gallery & Native Share via FileProvider
+ * Full-Screen Lyrics Video & iOS Player Card Studio Sheet (Upgraded V3):
+ * - 3 Style Modes matching Video 1: `Fokus` | `Lirik` | `Kartu Pemutar (iOS Player Card)`
+ * - 4 Aspect Ratios: `1:1` | `4:5` | `9:16` | `16:9`
+ * - Timing Offset adjustments: `-0.5 dtk` | `+0.5 dtk`
+ * - Live Animated Karaoke Preview toggle + H.264 `.mp4` Video Export (`Buat Video MP4`)
+ * - Quick Share chips (`Status WA`, `WA Bisnis`, `Instagram Story`, `Bagikan Gambar`)
  */
 @Composable
 fun RezonaPosterStudio(
@@ -81,6 +92,7 @@ fun RezonaPosterStudio(
     onDismiss: () -> Unit
 ) {
     val context = LocalContext.current
+    val scope = rememberCoroutineScope()
     val preferences = remember { RezonaPreferences(context) }
     val savedLyricsStyle by preferences.lyricsStyleFlow.collectAsState(initial = LyricsStyleConfig())
 
@@ -94,7 +106,8 @@ fun RezonaPosterStudio(
         }
     }
 
-    var format by remember { mutableStateOf(PosterFormat.SQUARE) }
+    var styleMode by remember { mutableStateOf(PosterStyleMode.PLAYER_CARD) }
+    var format by remember { mutableStateOf(PosterFormat.PORTRAIT_4_5) }
     var background by remember { mutableStateOf(PosterBackground.GLASS) }
     var font by remember { mutableStateOf(PosterFont.EDITORIAL) }
     var useSyncedLyricsFont by remember { mutableStateOf(true) }
@@ -106,10 +119,40 @@ fun RezonaPosterStudio(
     }
     var showThumbnail by remember { mutableStateOf(true) }
     var showWatermark by remember { mutableStateOf(true) }
+    var timingOffsetSec by remember { mutableFloatStateOf(0f) }
+    var liveKaraokePreview by remember { mutableStateOf(true) }
+    var isExportingVideo by remember { mutableStateOf(false) }
+    var coverBitmap by remember { mutableStateOf<Bitmap?>(null) }
 
-    // Live Rendered Bitmap Preview (inherits Part 5 Lyrics Style bundled font!)
+    LaunchedEffect(track.coverArtUrl) {
+        if (track.coverArtUrl.isNotBlank()) {
+            coverBitmap = withContext(Dispatchers.IO) {
+                runCatching {
+                    val conn = (URL(track.coverArtUrl).openConnection() as HttpURLConnection).apply {
+                        connectTimeout = 5000
+                        readTimeout = 5000
+                    }
+                    conn.inputStream.use { BitmapFactory.decodeStream(it) }
+                }.getOrNull()
+            }
+        }
+    }
+
+    val infiniteTransition = rememberInfiniteTransition(label = "lyrics_video_preview")
+    val animProgress by infiniteTransition.animateFloat(
+        initialValue = 0.14f,
+        targetValue = 0.92f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(durationMillis = 3600, easing = LinearEasing),
+            repeatMode = RepeatMode.Restart
+        ),
+        label = "karaoke_progress"
+    )
+    val effectiveProgress = if (liveKaraokePreview) (animProgress * 20).toInt() / 20f else 0.42f
+
     val previewBitmap: Bitmap? = remember(
         selectedLines.toList(),
+        styleMode,
         format,
         background,
         font,
@@ -118,7 +161,10 @@ fun RezonaPosterStudio(
         isBold,
         isCentered,
         showThumbnail,
-        showWatermark
+        showWatermark,
+        coverBitmap,
+        effectiveProgress,
+        timingOffsetSec
     ) {
         if (selectedLines.isEmpty()) null
         else PosterRenderer.renderPosterBitmap(
@@ -134,7 +180,11 @@ fun RezonaPosterStudio(
             isCentered = isCentered,
             showThumbnail = showThumbnail,
             showWatermark = showWatermark,
-            customLyricsStyle = if (useSyncedLyricsFont) savedLyricsStyle else null
+            customLyricsStyle = if (useSyncedLyricsFont) savedLyricsStyle else null,
+            styleMode = styleMode,
+            coverArtBitmap = coverBitmap,
+            animProgress = effectiveProgress,
+            timingOffsetSec = timingOffsetSec
         )
     }
 
@@ -145,42 +195,58 @@ fun RezonaPosterStudio(
             .statusBarsPadding()
             .navigationBarsPadding()
     ) {
-        Column(
-            modifier = Modifier.fillMaxSize()
-        ) {
+        Column(modifier = Modifier.fillMaxSize()) {
             // Header Bar
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 14.dp),
+                    .padding(horizontal = 20.dp, vertical = 12.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Text(
-                    text = "POSTER STUDIO",
-                    style = Typography.titleLarge.copy(
-                        fontSize = 17.sp,
-                        fontWeight = FontWeight.Bold,
-                        letterSpacing = 1.2.sp
-                    ),
-                    color = PearlWhite
-                )
-
-                // Close Button
-                Box(
-                    modifier = Modifier
-                        .size(36.dp)
-                        .clip(CircleShape)
-                        .background(Color(0x331C1F26))
-                        .clickable(onClick = onDismiss),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        painter = painterResource(id = R.drawable.ic_close),
-                        contentDescription = "Close",
-                        tint = SoftSilver,
-                        modifier = Modifier.size(18.dp)
+                Column {
+                    Text(
+                        text = "STUDIO VIDEO LIRIK & KARTU iOS",
+                        style = Typography.titleLarge.copy(
+                            fontSize = 16.sp,
+                            fontWeight = FontWeight.ExtraBold,
+                            letterSpacing = 1.sp
+                        ),
+                        color = PearlWhite
                     )
+                    Text(
+                        text = "${track.title} · ${selectedLines.size} baris dipilih",
+                        style = Typography.bodySmall.copy(fontSize = 11.5.sp),
+                        color = SoftSilver
+                    )
+                }
+
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                    RezonaGlassPill(
+                        isActive = liveKaraokePreview,
+                        onClick = { liveKaraokePreview = !liveKaraokePreview }
+                    ) {
+                        Text(
+                            text = if (liveKaraokePreview) "▶ Live: ON" else "⏸ Live: OFF",
+                            style = Typography.labelSmall.copy(fontWeight = FontWeight.ExtraBold),
+                            color = PureWhite
+                        )
+                    }
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(Color(0x331C1F26))
+                            .clickable(onClick = onDismiss),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            painter = painterResource(id = R.drawable.ic_close),
+                            contentDescription = "Close",
+                            tint = SoftSilver,
+                            modifier = Modifier.size(18.dp)
+                        )
+                    }
                 }
             }
 
@@ -188,26 +254,32 @@ fun RezonaPosterStudio(
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth(),
-                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 10.dp),
-                verticalArrangement = Arrangement.spacedBy(22.dp)
+                contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
+                verticalArrangement = Arrangement.spacedBy(18.dp)
             ) {
                 // ── 1. LIVE PREVIEW CANVAS ──────────────────────────────────────
                 item(key = "preview_canvas") {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(vertical = 4.dp),
+                            .padding(vertical = 2.dp),
                         contentAlignment = Alignment.Center
                     ) {
                         if (previewBitmap != null) {
-                            val ratio = if (format == PosterFormat.SQUARE) 1f else (9f / 16f)
+                            val ratio = format.width.toFloat() / format.height.toFloat()
+                            val previewWidthDp = when (format) {
+                                PosterFormat.SQUARE -> 250.dp
+                                PosterFormat.PORTRAIT_4_5 -> 225.dp
+                                PosterFormat.STORY -> 185.dp
+                                PosterFormat.LANDSCAPE_16_9 -> 300.dp
+                            }
                             Box(
                                 modifier = Modifier
-                                    .width(if (format == PosterFormat.SQUARE) 260.dp else 190.dp)
+                                    .width(previewWidthDp)
                                     .aspectRatio(ratio)
-                                    .shadow(24.dp, RoundedCornerShape(16.dp), spotColor = Color(0x99000000))
-                                    .clip(RoundedCornerShape(16.dp))
-                                    .border(1.dp, SpecularDockBorder, RoundedCornerShape(16.dp))
+                                    .shadow(24.dp, RoundedCornerShape(18.dp), spotColor = Color(0x99000000))
+                                    .clip(RoundedCornerShape(18.dp))
+                                    .border(1.dp, SpecularDockBorder, RoundedCornerShape(18.dp))
                             ) {
                                 Image(
                                     bitmap = previewBitmap.asImageBitmap(),
@@ -219,18 +291,128 @@ fun RezonaPosterStudio(
                     }
                 }
 
-                // ── 2. LINE SELECTION (CHIP ROW) ────────────────────────────────
-                item(key = "line_selection") {
+                // ── 2. GAYA (STYLE MODE: FOKUS | LIRIK | KARTU PEMUTAR) ─────────
+                item(key = "style_mode_selector") {
                     Column {
                         Text(
-                            text = "SELECT LINES (${selectedLines.size}/8)",
+                            text = "GAYA TAMPILAN",
                             style = Typography.labelSmall.copy(fontWeight = FontWeight.Bold, letterSpacing = 1.sp),
                             color = SmokySilver
                         )
-                        Spacer(modifier = Modifier.height(10.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            PosterStyleMode.values().forEach { mode ->
+                                val active = styleMode == mode
+                                RezonaGlassPill(
+                                    isActive = active,
+                                    onClick = { styleMode = mode },
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text(
+                                        text = mode.label,
+                                        style = Typography.labelMedium.copy(fontWeight = FontWeight.ExtraBold),
+                                        color = if (active) PureWhite else SoftSilver
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
 
-                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                            allLines.take(12).forEach { line ->
+                // ── 3. RASIO (1:1 | 4:5 | 9:16 | 16:9) & TIMING (-0.5s / +0.5s) ─
+                item(key = "format_and_timing") {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "RASIO & TIMING LIRIK",
+                                style = Typography.labelSmall.copy(fontWeight = FontWeight.Bold, letterSpacing = 1.sp),
+                                color = SmokySilver
+                            )
+                            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                                RezonaGlassPill(
+                                    isActive = false,
+                                    onClick = { timingOffsetSec = (timingOffsetSec - 0.5f).coerceIn(-5f, 5f) }
+                                ) {
+                                    Text("-0.5 dtk", style = Typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = PureWhite)
+                                }
+                                RezonaGlassPill(
+                                    isActive = kotlin.math.abs(timingOffsetSec) >= 0.05f,
+                                    onClick = { timingOffsetSec = 0f }
+                                ) {
+                                    Text(
+                                        text = String.format("%+.1fs", timingOffsetSec),
+                                        style = Typography.labelSmall.copy(fontWeight = FontWeight.ExtraBold),
+                                        color = Color(0xFF70D6FF)
+                                    )
+                                }
+                                RezonaGlassPill(
+                                    isActive = false,
+                                    onClick = { timingOffsetSec = (timingOffsetSec + 0.5f).coerceIn(-5f, 5f) }
+                                ) {
+                                    Text("+0.5 dtk", style = Typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = PureWhite)
+                                }
+                            }
+                        }
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            PosterFormat.values().forEach { fmt ->
+                                val active = format == fmt
+                                RezonaGlassPill(
+                                    isActive = active,
+                                    onClick = { format = fmt },
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text(
+                                        text = fmt.label,
+                                        style = Typography.labelMedium.copy(fontWeight = FontWeight.ExtraBold),
+                                        color = if (active) PureWhite else SoftSilver
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ── 4. LATAR (KACA | POLOS | BURAM | GRADASI) ───────────────────
+                item(key = "bg_selector") {
+                    Column {
+                        Text(text = "LATAR BELAKANG", style = Typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = SmokySilver)
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            PosterBackground.values().forEach { bg ->
+                                val active = background == bg
+                                RezonaGlassPill(
+                                    isActive = active,
+                                    onClick = { background = bg },
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Text(
+                                        text = bg.label,
+                                        style = Typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = if (active) PureWhite else SoftSilver
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                // ── 5. LINE SELECTION (PILIH BARIS LIRIK) ───────────────────────
+                item(key = "line_selection") {
+                    Column {
+                        Text(
+                            text = "PILIH BARIS LIRIK (${selectedLines.size}/8)",
+                            style = Typography.labelSmall.copy(fontWeight = FontWeight.Bold, letterSpacing = 1.sp),
+                            color = SmokySilver
+                        )
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+                            allLines.take(14).forEach { line ->
                                 val isSelected = selectedLines.contains(line)
                                 RezonaGlassCard(
                                     modifier = Modifier.fillMaxWidth(),
@@ -246,7 +428,7 @@ fun RezonaPosterStudio(
                                     Row(
                                         modifier = Modifier
                                             .fillMaxWidth()
-                                            .padding(horizontal = 14.dp, vertical = 10.dp),
+                                            .padding(horizontal = 14.dp, vertical = 9.dp),
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Box(
@@ -280,58 +462,10 @@ fun RezonaPosterStudio(
                     }
                 }
 
-                // ── 3. FORMAT SELECTOR (SQUARE / STORY) ──────────────────────────
-                item(key = "format_selector") {
-                    Column {
-                        Text(text = "FORMAT", style = Typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = SmokySilver)
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-                            PosterFormat.values().forEach { fmt ->
-                                val active = format == fmt
-                                RezonaGlassPill(
-                                    isActive = active,
-                                    onClick = { format = fmt },
-                                    modifier = Modifier.weight(1f)
-                                ) {
-                                    Text(
-                                        text = fmt.label,
-                                        style = Typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                                        color = if (active) PureWhite else SoftSilver
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // ── 4. BACKGROUND SELECTOR ──────────────────────────────────────
-                item(key = "bg_selector") {
-                    Column {
-                        Text(text = "BACKGROUND", style = Typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = SmokySilver)
-                        Spacer(modifier = Modifier.height(8.dp))
-                        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            items(PosterBackground.values()) { bg ->
-                                val active = background == bg
-                                RezonaGlassPill(
-                                    isActive = active,
-                                    onClick = { background = bg }
-                                ) {
-                                    Text(
-                                        text = bg.label,
-                                        style = Typography.labelMedium,
-                                        color = if (active) PureWhite else SoftSilver
-                                    )
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // ── 5. FONT SELECTOR & WEIGHT ───────────────────────────────────
-                item(key = "font_selector") {
-                    Column {
-                        Text(text = "TYPOGRAPHY", style = Typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = SmokySilver)
-                        Spacer(modifier = Modifier.height(8.dp))
+                // ── 6. FONT SELECTOR & QUICK SHARE TARGETS (WA STATUS / IG) ─────
+                item(key = "font_and_quick_share") {
+                    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                        Text(text = "TIPOGRAFI & BAGIKAN CEPAT", style = Typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = SmokySilver)
                         LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             item(key = "poster_lyrics_font_sync") {
                                 RezonaGlassPill(
@@ -363,74 +497,84 @@ fun RezonaPosterStudio(
                             }
                         }
 
-                        Spacer(modifier = Modifier.height(10.dp))
-
-                        // Controls: Bold / Alignment / Toggles
-                        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                        // Quick Share Chips: Status WA | Status WA Bisnis | Instagram Story
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                             RezonaGlassPill(
-                                isActive = isBold,
-                                onClick = { isBold = !isBold },
+                                isActive = false,
+                                onClick = {
+                                    if (previewBitmap != null) {
+                                        PosterRenderer.sharePoster(context, previewBitmap, "com.whatsapp")
+                                    }
+                                },
                                 modifier = Modifier.weight(1f)
                             ) {
-                                Text(text = if (isBold) "Bold" else "Regular", style = Typography.labelSmall, color = PureWhite)
+                                Text("Status WA", style = Typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = PureWhite)
                             }
                             RezonaGlassPill(
-                                isActive = isCentered,
-                                onClick = { isCentered = !isCentered },
+                                isActive = false,
+                                onClick = {
+                                    if (previewBitmap != null) {
+                                        PosterRenderer.sharePoster(context, previewBitmap, "com.whatsapp.w4b")
+                                    }
+                                },
                                 modifier = Modifier.weight(1f)
                             ) {
-                                Text(text = if (isCentered) "Center" else "Left", style = Typography.labelSmall, color = PureWhite)
+                                Text("WA Bisnis", style = Typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = PureWhite)
                             }
                             RezonaGlassPill(
-                                isActive = showThumbnail,
-                                onClick = { showThumbnail = !showThumbnail },
+                                isActive = false,
+                                onClick = {
+                                    if (previewBitmap != null) {
+                                        PosterRenderer.sharePoster(context, previewBitmap, "com.instagram.android")
+                                    }
+                                },
                                 modifier = Modifier.weight(1f)
                             ) {
-                                Text(text = "Thumb", style = Typography.labelSmall, color = if (showThumbnail) PureWhite else SmokySilver)
+                                Text("Instagram", style = Typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = PureWhite)
                             }
                         }
                     }
                 }
             }
 
-            // ── ACTION BUTTONS ROW (SAVE & SHARE) ────────────────────────────
+            // ── BOTTOM ACTION BUTTONS: SIMPAN GAMBAR | BAGIKAN GAMBAR | BUAT VIDEO MP4 ──
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 20.dp, vertical = 14.dp),
-                horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    .padding(horizontal = 20.dp, vertical = 12.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
             ) {
-                // Save to Gallery
+                // Save PNG
                 Box(
                     modifier = Modifier
-                        .weight(1f)
-                        .height(52.dp)
-                        .clip(RoundedCornerShape(26.dp))
+                        .weight(0.9f)
+                        .height(50.dp)
+                        .clip(RoundedCornerShape(25.dp))
                         .background(Color(0x331C1F26))
-                        .border(1.dp, SpecularCardBorder, RoundedCornerShape(26.dp))
+                        .border(1.dp, SpecularCardBorder, RoundedCornerShape(25.dp))
                         .clickable {
                             if (previewBitmap != null) {
                                 val saved = PosterRenderer.saveToGallery(context, previewBitmap)
-                                Toast.makeText(context, if (saved) "Saved to Pictures/Rezona" else "Failed to save", Toast.LENGTH_SHORT).show()
+                                Toast.makeText(context, if (saved) "Disimpan ke Pictures/Rezona" else "Gagal menyimpan", Toast.LENGTH_SHORT).show()
                             }
                         },
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = "Save to Gallery",
-                        style = Typography.titleMedium.copy(fontWeight = FontWeight.Bold, fontSize = 14.sp),
+                        text = "Simpan PNG",
+                        style = Typography.titleSmall.copy(fontWeight = FontWeight.Bold, fontSize = 13.sp),
                         color = PearlWhite
                     )
                 }
 
-                // Share Button (ACTION_SEND via FileProvider)
+                // Share PNG
                 Box(
                     modifier = Modifier
-                        .weight(1f)
-                        .height(52.dp)
-                        .clip(RoundedCornerShape(26.dp))
-                        .background(PureWhite)
-                        .border(1.dp, Brush.verticalGradient(listOf(Color.White, Color(0x66FFFFFF))), RoundedCornerShape(26.dp))
+                        .weight(0.9f)
+                        .height(50.dp)
+                        .clip(RoundedCornerShape(25.dp))
+                        .background(Color(0x28FFFFFF))
+                        .border(1.dp, SpecularDockBorder, RoundedCornerShape(25.dp))
                         .clickable {
                             if (previewBitmap != null) {
                                 PosterRenderer.sharePoster(context, previewBitmap)
@@ -439,8 +583,61 @@ fun RezonaPosterStudio(
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
-                        text = "Share Poster",
-                        style = Typography.titleMedium.copy(fontWeight = FontWeight.Bold, fontSize = 14.sp),
+                        text = "Share Gambar",
+                        style = Typography.titleSmall.copy(fontWeight = FontWeight.Bold, fontSize = 13.sp),
+                        color = PureWhite
+                    )
+                }
+
+                // Export Animated MP4 Video ("Buat Video")
+                Box(
+                    modifier = Modifier
+                        .weight(1.2f)
+                        .height(50.dp)
+                        .clip(RoundedCornerShape(25.dp))
+                        .background(PureWhite)
+                        .border(1.dp, Brush.verticalGradient(listOf(Color.White, Color(0x66FFFFFF))), RoundedCornerShape(25.dp))
+                        .clickable(enabled = !isExportingVideo) {
+                            if (selectedLines.isNotEmpty()) {
+                                isExportingVideo = true
+                                Toast.makeText(context, "Merender Video Lirik MP4...", Toast.LENGTH_SHORT).show()
+                                val linesCopy = selectedLines.toList()
+                                scope.launch {
+                                    val videoFile = withContext(Dispatchers.Default) {
+                                        PosterRenderer.exportLyricsVideoMp4(
+                                            context = context,
+                                            lines = linesCopy,
+                                            trackTitle = track.title,
+                                            trackArtist = track.artist,
+                                            coverIndex = track.index,
+                                            format = format,
+                                            background = background,
+                                            font = font,
+                                            isBold = isBold,
+                                            isCentered = isCentered,
+                                            showThumbnail = showThumbnail,
+                                            showWatermark = showWatermark,
+                                            customLyricsStyle = if (useSyncedLyricsFont) savedLyricsStyle else null,
+                                            styleMode = styleMode,
+                                            coverArtBitmap = coverBitmap,
+                                            timingOffsetSec = timingOffsetSec
+                                        )
+                                    }
+                                    isExportingVideo = false
+                                    if (videoFile != null && videoFile.exists()) {
+                                        Toast.makeText(context, "Video MP4 disimpan ke Movies/Rezona!", Toast.LENGTH_SHORT).show()
+                                        PosterRenderer.shareVideoFile(context, videoFile)
+                                    } else {
+                                        Toast.makeText(context, "Gagal membuat video MP4", Toast.LENGTH_SHORT).show()
+                                    }
+                                }
+                            }
+                        },
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(
+                        text = if (isExportingVideo) "Merender..." else "Buat Video MP4",
+                        style = Typography.titleSmall.copy(fontWeight = FontWeight.ExtraBold, fontSize = 13.sp),
                         color = Color(0xFF08090B)
                     )
                 }

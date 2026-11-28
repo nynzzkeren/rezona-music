@@ -254,6 +254,10 @@ fun RezonaHomeScreen(
     var menuTrack by remember { mutableStateOf<RezonaTrack?>(null) }
     var showEqualizer by remember { mutableStateOf(false) }
     var show3dPosterStudio by remember { mutableStateOf(false) }
+    var showSuperLab by remember { mutableStateOf(false) }
+    var showGuitarChords by remember { mutableStateOf(false) }
+    var showLyricsVideoStudio by remember { mutableStateOf(false) }
+    var showPcSyncDialog by remember { mutableStateOf(false) }
 
     suspend fun loadHomeData(forceRefresh: Boolean = false) {
         coroutineScope {
@@ -427,6 +431,33 @@ fun RezonaHomeScreen(
                         contentPadding = PaddingValues(horizontal = 20.dp),
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
+                        item(key = "freq_streak_fire") {
+                            val streakDays = remember(historyTracks.size) {
+                                ((historyTracks.size / 3) + 1).coerceAtLeast(1)
+                            }
+                            RezonaGlassPill(
+                                isActive = true,
+                                onClick = { showSuperLab = true }
+                            ) {
+                                Text(
+                                    text = "🔥 $streakDays hari berturut-turut",
+                                    style = Typography.labelLarge.copy(fontSize = 12.sp, fontWeight = FontWeight.ExtraBold),
+                                    color = PureWhite
+                                )
+                            }
+                        }
+                        item(key = "freq_superlab") {
+                            RezonaGlassPill(
+                                isActive = true,
+                                onClick = { showSuperLab = true }
+                            ) {
+                                Text(
+                                    text = "✨ 24+ SuperLab",
+                                    style = Typography.labelLarge.copy(fontSize = 12.sp, fontWeight = FontWeight.ExtraBold),
+                                    color = Color(0xFF70D6FF)
+                                )
+                            }
+                        }
                         item(key = "freq_smart_mix") {
                             RezonaGlassPill(
                                 isActive = true,
@@ -957,6 +988,48 @@ fun RezonaHomeScreen(
 
     if (showEqualizer) {
         RezonaEqualizerModalSheet(onDismiss = { showEqualizer = false })
+    }
+
+    if (showSuperLab) {
+        com.nayama.music.ui.player.RezonaSuperLabSheet(
+            track = controller.currentTrack.value ?: spotlightLead,
+            controller = controller,
+            onDismiss = { showSuperLab = false },
+            onOpen3dPoster = { show3dPosterStudio = true },
+            onOpenLyricsVideo = { showLyricsVideoStudio = true },
+            onOpenGuitarChords = { showGuitarChords = true },
+            onOpenPcSync = { showPcSyncDialog = true }
+        )
+    }
+
+    if (showGuitarChords) {
+        com.nayama.music.ui.player.RezonaGuitarChordStudioSheet(
+            track = controller.currentTrack.value ?: spotlightLead,
+            lyrics = controller.currentLyrics.value,
+            currentPositionMs = controller.currentPositionMs.longValue,
+            onSeekToMs = { controller.seekToPosition(it) },
+            onDismiss = { showGuitarChords = false }
+        )
+    }
+
+    if (showLyricsVideoStudio) {
+        val activeTrack = controller.currentTrack.value ?: spotlightLead
+        val allLineTexts = controller.currentLyrics.value.map { it.text }.ifEmpty {
+            listOf(activeTrack.title, activeTrack.artist, "Rezona Liquid Glass Audio")
+        }
+        com.nayama.music.ui.lyrics.RezonaPosterStudio(
+            track = activeTrack,
+            allLines = allLineTexts,
+            initialSelectedLines = allLineTexts.take(3),
+            onDismiss = { showLyricsVideoStudio = false }
+        )
+    }
+
+    if (showPcSyncDialog) {
+        com.nayama.music.ui.player.RezonaPcSyncDialog(
+            track = controller.currentTrack.value ?: spotlightLead,
+            onDismiss = { showPcSyncDialog = false }
+        )
     }
 }
 

@@ -189,6 +189,10 @@ fun RezonaExpandedPlayer(
     var show3dSongPosterStudio by remember { mutableStateOf(false) }
     var showEqualizerSheet by remember { mutableStateOf(false) }
     var showAmbientMode by remember { mutableStateOf(false) }
+    var showControlCenterGrid by remember { mutableStateOf(false) }
+    var showGuitarChordStudio by remember { mutableStateOf(false) }
+    var showSuperLabSheet by remember { mutableStateOf(false) }
+    var showPcSyncDialog by remember { mutableStateOf(false) }
     var showHeartBurst by remember { mutableStateOf(false) }
     var dismissDragY by remember { mutableFloatStateOf(0f) }
 
@@ -302,6 +306,7 @@ fun RezonaExpandedPlayer(
                             }
                         },
                         onOpenQueue = { showQueueSheet = true },
+                        onOpenControlCenter = { showControlCenterGrid = true },
                         onOpenMenu = { showTrackMenuSheet = true }
                     )
 
@@ -511,6 +516,52 @@ fun RezonaExpandedPlayer(
         RezonaEqualizerModalSheet(onDismiss = { showEqualizerSheet = false })
     }
 
+    if (showControlCenterGrid) {
+        RezonaIosControlCenterGridSheet(
+            track = track,
+            controller = controller,
+            onDismiss = { showControlCenterGrid = false },
+            onOpenSleepTimer = { showSleepTimerSheet = true },
+            onOpenEqualizer = { showEqualizerSheet = true },
+            onOpenSoundStyle = { showSoundSheet = true },
+            onOpenAmbientMode = { showAmbientMode = true },
+            onOpenPosterStudio = { showPosterStudio = true },
+            onOpen3dSongPoster = { show3dSongPosterStudio = true },
+            onOpenGuitarChords = { showGuitarChordStudio = true },
+            onOpenSuperLab = { showSuperLabSheet = true },
+            onOpenPcSync = { showPcSyncDialog = true }
+        )
+    }
+
+    if (showGuitarChordStudio) {
+        RezonaGuitarChordStudioSheet(
+            track = track,
+            lyrics = controller.currentLyrics.value,
+            currentPositionMs = currentPosition,
+            onSeekToMs = { controller.seekToPosition(it) },
+            onDismiss = { showGuitarChordStudio = false }
+        )
+    }
+
+    if (showSuperLabSheet) {
+        RezonaSuperLabSheet(
+            track = track,
+            controller = controller,
+            onDismiss = { showSuperLabSheet = false },
+            onOpen3dPoster = { show3dSongPosterStudio = true },
+            onOpenLyricsVideo = { showPosterStudio = true },
+            onOpenGuitarChords = { showGuitarChordStudio = true },
+            onOpenPcSync = { showPcSyncDialog = true }
+        )
+    }
+
+    if (showPcSyncDialog) {
+        RezonaPcSyncDialog(
+            track = track,
+            onDismiss = { showPcSyncDialog = false }
+        )
+    }
+
     if (showAmbientMode) {
         AmbientCalmCoverOverlay(
             track = track,
@@ -534,6 +585,7 @@ private fun StudioTopModeBar(
     onCollapse: () -> Unit,
     onSelectMode: (String) -> Unit,
     onOpenQueue: () -> Unit,
+    onOpenControlCenter: () -> Unit = {},
     onOpenMenu: () -> Unit
 ) {
     val activeMode = when {
@@ -591,13 +643,13 @@ private fun StudioTopModeBar(
                             } else Modifier
                         )
                         .clickable { onSelectMode(label) }
-                        .padding(horizontal = 16.dp),
+                        .padding(horizontal = 14.dp),
                     contentAlignment = Alignment.Center
                 ) {
                     Text(
                         text = label,
                         style = Typography.labelMedium.copy(
-                            fontSize = 12.5.sp,
+                            fontSize = 12.sp,
                             fontWeight = if (selected) FontWeight.ExtraBold else FontWeight.Medium
                         ),
                         color = if (selected) PureWhite else SoftSilver
@@ -606,20 +658,27 @@ private fun StudioTopModeBar(
             }
         }
 
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            GlassCircleIconButton(
+                iconRes = R.drawable.ic_tune,
+                tint = PureWhite,
+                contentDescription = "iOS Control Center & SuperLab",
+                onClick = onOpenControlCenter,
+                sizeDp = 40
+            )
             GlassCircleIconButton(
                 iconRes = R.drawable.ic_queue_music,
                 tint = PureWhite,
                 contentDescription = "Open Queue",
                 onClick = onOpenQueue,
-                sizeDp = 42
+                sizeDp = 40
             )
             GlassCircleIconButton(
                 iconRes = R.drawable.ic_more_vert,
                 tint = PureWhite,
                 contentDescription = "Track Options",
                 onClick = onOpenMenu,
-                sizeDp = 42
+                sizeDp = 40
             )
         }
     }
