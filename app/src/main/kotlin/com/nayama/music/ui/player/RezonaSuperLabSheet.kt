@@ -1493,7 +1493,7 @@ fun RezonaPcSyncDialog(
         confirmText = "Salin Kode & Link PC",
         onConfirm = {
             val cm = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-            val syncPayload = "Rezona Windows Sync Code: $pairCode\nBuka Rezona Windows Desktop atau https://rezona-music.vercel.app/desktop.html"
+            val syncPayload = "Rezona Windows Sync Code: $pairCode\nBuka Rezona Windows Desktop atau https://rezona-music-web.vercel.app/desktop.html"
             cm.setPrimaryClip(ClipData.newPlainText("Rezona PC Sync", syncPayload))
             Toast.makeText(context, "Kode Sinkron PC ($pairCode) disalin!", Toast.LENGTH_SHORT).show()
             onDismiss()

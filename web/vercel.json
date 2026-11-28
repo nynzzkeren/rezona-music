@@ -4,7 +4,9 @@
   "rewrites": [
     { "source": "/download", "destination": "/Rezona-release.apk" },
     { "source": "/download-release", "destination": "/Rezona-release.apk" },
-    { "source": "/app-release.apk", "destination": "/Rezona-release.apk" }
+    { "source": "/app-release.apk", "destination": "/Rezona-release.apk" },
+    { "source": "/download-windows", "destination": "/Rezona-Windows-Desktop.exe" },
+    { "source": "/windows", "destination": "/desktop.html" }
   ],
   "headers": [
     {
@@ -12,6 +14,14 @@
       "headers": [
         { "key": "Content-Type", "value": "application/vnd.android.package-archive" },
         { "key": "Content-Disposition", "value": "attachment; filename=\"Rezona-release.apk\"" },
+        { "key": "Cache-Control", "value": "public, max-age=300" }
+      ]
+    },
+    {
+      "source": "/Rezona-Windows-Desktop.exe",
+      "headers": [
+        { "key": "Content-Type", "value": "application/octet-stream" },
+        { "key": "Content-Disposition", "value": "attachment; filename=\"Rezona-Windows-Desktop.exe\"" },
         { "key": "Cache-Control", "value": "public, max-age=300" }
       ]
     }
